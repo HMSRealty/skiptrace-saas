@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Mohamed\\\\skiptrace-saas\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(ls -la \"C:\\\\\\\\Users\\\\\\\\Mohamed\\\\\\\\skiptrace-saas\")",
+      "Bash(find \"C:\\\\\\\\Users\\\\\\\\Mohamed\\\\\\\\skiptrace-saas\" -maxdepth 1 -type d)",
+      "Bash(npm install *)",
+      "PowerShell(npx tsc --noEmit 2>&1)",
+      "Bash(which node *)",
+      "PowerShell($p = @\\(\"$env:ProgramFiles\\\\nodejs\\\\node.exe\",\"$env:LOCALAPPDATA\\\\Programs\\\\nodejs\\\\node.exe\",\"$env:APPDATA\\\\npm\\\\node.exe\",\"$env:ProgramFiles\\\\nodejs\\\\node_modules\\\\npm\\\\bin\\\\npx-cli.js\"\\); foreach\\($x in $p\\){ if\\(Test-Path $x\\){ Write-Output \"FOUND: $x\" } }; Get-Command node -ErrorAction SilentlyContinue | Select Source; \\(Get-ChildItem \"$env:ProgramFiles\\\\nodejs\" -ErrorAction SilentlyContinue\\).Name -join ', ')"
+    ]
+  }
+}
