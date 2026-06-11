@@ -203,13 +203,13 @@ async function runSkipTrace(
 
     const creditsToDeduct = records.length;
     if (currentCredits !== null) {
-      await getSupabaseAdmin()
+      await (await getSupabaseAdmin())
         .from('profiles')
         .update({ credits_balance: currentCredits - creditsToDeduct })
         .eq('id', userId);
     }
 
-    await getSupabaseAdmin()
+    await (await getSupabaseAdmin())
       .from('trace_jobs')
       .update({
         status: 'completed',
@@ -263,7 +263,7 @@ async function runSkipTrace(
       }).catch(() => {});
     }
   } catch (err: any) {
-    await getSupabaseAdmin()
+    await (await getSupabaseAdmin())
       .from('trace_jobs')
       .update({ status: 'failed', error_message: err?.message || 'Unknown error' })
       .eq('id', jobId);
@@ -283,7 +283,7 @@ export async function POST(request: Request) {
     let currentCredits: number | null = null;
 
     if (hasServiceRole) {
-      const { data: profile, error: profileErr } = await getSupabaseAdmin()
+      const { data: profile, error: profileErr } = await (await getSupabaseAdmin())
         .from('profiles')
         .select('credits_balance')
         .eq('id', userId)
@@ -298,7 +298,8 @@ export async function POST(request: Request) {
       currentCredits = profile.credits_balance;
     }
 
-    const insertResult = await getSupabaseAdmin()
+    const sb = await getSupabaseAdmin();
+    const insertResult = await sb
       .from('trace_jobs')
       .insert({
         user_id: userId,

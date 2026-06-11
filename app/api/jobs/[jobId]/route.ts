@@ -16,7 +16,7 @@ export async function GET(
       return NextResponse.json({ error: 'Missing jobId or userId' }, { status: 400 });
     }
 
-    const { data: job, error } = await getSupabaseAdmin()
+    const { data: job, error } = await (await getSupabaseAdmin())
       .from('trace_jobs')
       .select('id, status, file_name, total_records, successful_hits, credits_used, result_data, error_message, user_id, created_at')
       .eq('id', jobId)
