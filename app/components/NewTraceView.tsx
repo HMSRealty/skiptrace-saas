@@ -15,50 +15,52 @@ interface Props {
 interface CSVRecord { [key: string]: string; }
 type Step = 'upload' | 'map' | 'processing' | 'done';
 
-function readSession() {
-  if (typeof window === 'undefined') return null;
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { return null; }
-}
-function readActiveJob() {
-  if (typeof window === 'undefined') return null;
-  try { return JSON.parse(localStorage.getItem(JOB_KEY) || 'null'); } catch { return null; }
+type InitialState = {
+  step: Step;
+  fileName: string;
+  headers: string[];
+  fullData: CSVRecord[];
+  columnMap: any;
+};
+
+function readInitialState(): InitialState {
+  const empty: InitialState = { step: 'upload', fileName: '', headers: [], fullData: [], columnMap: null };
+  if (typeof window === 'undefined') return empty;
+  let job: any = null;
+  let sess: any = null;
+  try { job = JSON.parse(localStorage.getItem(JOB_KEY) || 'null'); } catch {}
+  try { sess = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch {}
+  if (job?.jobId) {
+    return {
+      step: 'processing',
+      fileName: job.fileName || sess?.fileName || 'Resuming...',
+      headers: sess?.headers || [],
+      fullData: sess?.fullData || new Array(job.totalRecords || 0).fill({}),
+      columnMap: sess?.columnMap || null,
+    };
+  }
+  if (sess?.headers && sess?.fullData) {
+    return {
+      step: 'map',
+      fileName: sess.fileName || 'Restored list',
+      headers: sess.headers,
+      fullData: sess.fullData,
+      columnMap: sess.columnMap || null,
+    };
+  }
+  return empty;
 }
 
 export default function NewTraceView({ session, credits, onTraceComplete, onBuyCredits }: Props) {
-  // Initialize state DIRECTLY from localStorage so the first render already shows the right step.
-  const initial = (() => {
-    const job = readActiveJob();
-    const sess = readSession();
-    if (job?.jobId) {
-      return {
-        step: 'processing' as Step,
-        fileName: job.fileName || sess?.fileName || 'Resuming...',
-        headers: sess?.headers || [],
-        fullData: sess?.fullData || new Array(job.totalRecords || 0).fill({}),
-        columnMap: sess?.columnMap || null,
-      };
-    }
-    if (sess?.headers && sess?.fullData) {
-      return {
-        step: 'map' as Step,
-        fileName: sess.fileName || 'Restored list',
-        headers: sess.headers,
-        fullData: sess.fullData,
-        columnMap: sess.columnMap || null,
-      };
-    }
-    return { step: 'upload' as Step, fileName: '', headers: [], fullData: [], columnMap: null };
-  })();
-
-  const [step, setStep] = useState<Step>(initial.step);
+  const [step, setStep] = useState<Step>(() => readInitialState().step);
   const [file, setFile] = useState<File | null>(null);
-  const [fileName, setFileName] = useState<string>(initial.fileName);
-  const [headers, setHeaders] = useState<string[]>(initial.headers);
-  const [fullData, setFullData] = useState<CSVRecord[]>(initial.fullData);
-  const [previewData, setPreviewData] = useState<CSVRecord[]>(initial.fullData.slice(0, 3));
+  const [fileName, setFileName] = useState<string>(() => readInitialState().fileName);
+  const [headers, setHeaders] = useState<string[]>(() => readInitialState().headers);
+  const [fullData, setFullData] = useState<CSVRecord[]>(() => readInitialState().fullData);
+  const [previewData, setPreviewData] = useState<CSVRecord[]>(() => readInitialState().fullData.slice(0, 3));
   const [dragOver, setDragOver] = useState(false);
 
-  const [columnMap, setColumnMap] = useState(initial.columnMap || {
+  const [columnMap, setColumnMap] = useState(() => readInitialState().columnMap || {
     firstName: '', lastName: '', street: '', city: '', state: '', zip: '',
     mailingStreet: '', mailingCity: '', mailingState: '', mailingZip: '',
   });
@@ -160,7 +162,8 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
 
   // Resume polling if there's a saved active job
   useEffect(() => {
-    const saved = readActiveJob();
+    let saved: any = null;
+    try { saved = JSON.parse(localStorage.getItem(JOB_KEY) || 'null'); } catch {}
     if (!saved?.jobId) return;
     setActiveJobId(saved.jobId);
     startPolling(saved.jobId, saved.estimatedMs || 60000);
