@@ -5,7 +5,6 @@ import { getSupabaseAdmin } from '../../lib/supabaseAdmin';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Returns true if this record still needs a retry
 const needsRetry = (phone: string) =>
   ['Not Found', 'No match found', 'Lookup Error'].includes(phone);
 
@@ -28,59 +27,27 @@ async function processWithConcurrency(
 }
 
 const PASS_CONFIG = [
-  { concurrency: 8, batchDelay: 150,  preDelay: 0    }, // Pass 1 — main run
-  { concurrency: 6, batchDelay: 300,  preDelay: 1000 }, // Pass 2
-  { concurrency: 5, batchDelay: 500,  preDelay: 1500 }, // Pass 3
-  { concurrency: 4, batchDelay: 700,  preDelay: 2000 }, // Pass 4
-  { concurrency: 3, batchDelay: 900,  preDelay: 2500 }, // Pass 5
-  { concurrency: 3, batchDelay: 1100, preDelay: 3000 }, // Pass 6 — final sweep
+  { concurrency: 8, batchDelay: 150,  preDelay: 0    },
+  { concurrency: 6, batchDelay: 300,  preDelay: 1000 },
+  { concurrency: 5, batchDelay: 500,  preDelay: 1500 },
+  { concurrency: 4, batchDelay: 700,  preDelay: 2000 },
+  { concurrency: 3, batchDelay: 900,  preDelay: 2500 },
+  { concurrency: 3, batchDelay: 1100, preDelay: 3000 },
 ];
 
-export async function POST(request: Request) {
-  let jobId: string | null = null;
+async function runSkipTrace(
+  jobId: string,
+  records: any[],
+  columnMap: any,
+  userId: string,
+  fileName: string | undefined,
+  userEmail: string | undefined,
+  currentCredits: number | null
+) {
   try {
-    const body = await request.json();
-    const { records, columnMap, userId, fileName, userEmail } = body;
-
-    if (!records || !userId) {
-      return NextResponse.json({ error: 'Missing required data' }, { status: 400 });
-    }
-
-    const hasServiceRole = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
-    let currentCredits: number | null = null;
-
-    if (hasServiceRole) {
-      const { data: profile, error: profileErr } = await getSupabaseAdmin()
-        .from('profiles')
-        .select('credits_balance')
-        .eq('id', userId)
-        .single();
-
-      if (profileErr || !profile) {
-        return NextResponse.json({ error: 'User profile not found' }, { status: 403 });
-      }
-      if (profile.credits_balance < records.length) {
-        return NextResponse.json({ error: `Insufficient credits. Need ${records.length}, have ${profile.credits_balance}.` }, { status: 402 });
-      }
-      currentCredits = profile.credits_balance;
-    }
-
-    // Create job record
-    try {
-      const { data: job } = await getSupabaseAdmin()
-        .from('trace_jobs')
-        .insert({ user_id: userId, file_name: fileName || 'Untitled', total_records: records.length, status: 'processing' })
-        .select()
-        .single();
-      jobId = job?.id ?? null;
-    } catch { /* table may not exist yet */ }
-
-    // Build the lookup function for a single row
     const lookupRecord = async (row: any) => {
       const firstName = row[columnMap.firstName] || '';
       const lastName  = row[columnMap.lastName]  || '';
-
-      // Use property address; fall back to mailing address if missing
       const street = row[columnMap.street] || row[columnMap.mailingStreet] || '';
       const city   = row[columnMap.city]   || row[columnMap.mailingCity]   || '';
       const state  = row[columnMap.state]  || row[columnMap.mailingState]  || '';
@@ -144,12 +111,9 @@ export async function POST(request: Request) {
           if (detailsRes.ok) {
             const profileJson = await detailsRes.json();
             const allPhones: string[] = [];
-
-            // Primary phone first — from Person Details
             const primaryTel = profileJson['Person Details']?.[0]?.Telephone?.trim();
             if (primaryTel) allPhones.push(primaryTel);
 
-            // Additional phones from All Phone Details
             if (profileJson['All Phone Details']?.length > 0) {
               for (const p of profileJson['All Phone Details']) {
                 const phoneStr = (typeof p === 'string' ? p : (p['Phone Number'] || p.Phone || p.Telephone))?.trim();
@@ -176,56 +140,45 @@ export async function POST(request: Request) {
         } else {
           phone1 = 'No match found';
         }
-      } catch (err) {
-        console.error(`Error processing ${fullName}:`, err);
+      } catch {
         phone1 = 'Lookup Error';
       }
 
-      // Keep Skip_Trace_Phone for internal retry checking; clean output built after all passes
       return {
         _firstName: firstName, _lastName: lastName,
         _street: row[columnMap.street] || '', _city: row[columnMap.city] || '',
         _state: row[columnMap.state] || '', _zip: row[columnMap.zip] || '',
         _mailingStreet: row[columnMap.mailingStreet] || '', _mailingCity: row[columnMap.mailingCity] || '',
         _mailingState: row[columnMap.mailingState] || '', _mailingZip: row[columnMap.mailingZip] || '',
-        Skip_Trace_Phone: phone1, // used by needsRetry()
+        Skip_Trace_Phone: phone1,
         _phone2: phone2, _phone3: phone3, _phone4: phone4,
         _email: foundEmail, _matchedName: matchedName,
       };
     };
 
-    // ─── MULTI-PASS ENGINE ───────────────────────────────────────────
-    // Pass 1: run all records
     const cfg0 = PASS_CONFIG[0];
     let finalResults = await processWithConcurrency(records, lookupRecord, cfg0.concurrency, cfg0.batchDelay);
 
-    // Passes 2–4: retry only the records that didn't get a phone number
     for (let pass = 1; pass < PASS_CONFIG.length; pass++) {
-      // Find indices of records still needing a result
       const retryIndices = finalResults
         .map((r, i) => needsRetry(r.Skip_Trace_Phone) ? i : -1)
         .filter(i => i !== -1);
 
-      if (retryIndices.length === 0) break; // everyone found — stop early
+      if (retryIndices.length === 0) break;
 
       const cfg = PASS_CONFIG[pass];
-      console.log(`Pass ${pass + 1}: retrying ${retryIndices.length} unresolved records...`);
-
       await sleep(cfg.preDelay);
 
       const retryRows    = retryIndices.map(i => records[i]);
       const retryResults = await processWithConcurrency(retryRows, lookupRecord, cfg.concurrency, cfg.batchDelay);
 
-      // Merge successful retries back into final results
       retryIndices.forEach((originalIdx, retryIdx) => {
         if (!needsRetry(retryResults[retryIdx].Skip_Trace_Phone)) {
           finalResults[originalIdx] = retryResults[retryIdx];
         }
       });
     }
-    // ────────────────────────────────────────────────────────────────
 
-    // ─── BUILD CLEAN OUTPUT (only the columns users care about) ───────
     const cleanResults = finalResults.map(r => ({
       'Owner Full Name':   `${r._firstName} ${r._lastName}`.trim(),
       'Property Address':  r._street,
@@ -248,29 +201,24 @@ export async function POST(request: Request) {
       r['Primary Phone'] && !needsRetry(r['Primary Phone'])
     ).length;
 
-    // Deduct credits
     const creditsToDeduct = records.length;
-    if (hasServiceRole && currentCredits !== null) {
+    if (currentCredits !== null) {
       await getSupabaseAdmin()
         .from('profiles')
         .update({ credits_balance: currentCredits - creditsToDeduct })
         .eq('id', userId);
     }
 
-    // Save completed job + clean results
-    if (jobId) {
-      await getSupabaseAdmin()
-        .from('trace_jobs')
-        .update({
-          status: 'completed',
-          successful_hits: successfulHits,
-          credits_used: creditsToDeduct,
-          result_data: cleanResults,
-        })
-        .eq('id', jobId);
-    }
+    await getSupabaseAdmin()
+      .from('trace_jobs')
+      .update({
+        status: 'completed',
+        successful_hits: successfulHits,
+        credits_used: creditsToDeduct,
+        result_data: cleanResults,
+      })
+      .eq('id', jobId);
 
-    // ─── EMAIL NOTIFICATION ──────────────────────────────────────────
     if (process.env.RESEND_API_KEY && userEmail) {
       const hitRate = Math.round((successfulHits / records.length) * 100);
       await fetch('https://api.resend.com/emails', {
@@ -286,7 +234,7 @@ export async function POST(request: Request) {
           html: `
             <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#020c1b;color:#f0f6ff;padding:32px;border-radius:12px;">
               <div style="margin-bottom:24px;">
-                <span style="background:#2563eb;color:white;font-weight:900;font-size:18px;padding:6px 14px;border-radius:8px;">PropyLeads</span>
+                <span style="background:#059669;color:white;font-weight:900;font-size:18px;padding:6px 14px;border-radius:8px;">PropyLeads</span>
               </div>
               <h2 style="font-size:24px;font-weight:900;margin:0 0 8px;">Your skip trace is done! 🎯</h2>
               <p style="color:#6b90b5;margin:0 0 24px;">Here's a summary of your results:</p>
@@ -296,40 +244,87 @@ export async function POST(request: Request) {
                   <div style="font-size:12px;color:#6b90b5;">Records</div>
                 </div>
                 <div style="background:#041225;border:1px solid #0e2d52;border-radius:10px;padding:16px;text-align:center;">
-                  <div style="font-size:28px;font-weight:900;color:#3b82f6;">${successfulHits.toLocaleString()}</div>
+                  <div style="font-size:28px;font-weight:900;color:#34d399;">${successfulHits.toLocaleString()}</div>
                   <div style="font-size:12px;color:#6b90b5;">Contacts Found</div>
                 </div>
                 <div style="background:#041225;border:1px solid #0e2d52;border-radius:10px;padding:16px;text-align:center;">
-                  <div style="font-size:28px;font-weight:900;color:#60a5fa;">${hitRate}%</div>
+                  <div style="font-size:28px;font-weight:900;color:#6ee7b7;">${hitRate}%</div>
                   <div style="font-size:12px;color:#6b90b5;">Hit Rate</div>
                 </div>
               </div>
               <p style="color:#6b90b5;font-size:13px;">File: <strong style="color:#f0f6ff;">${fileName || 'Your list'}</strong></p>
-              <a href="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}" style="display:inline-block;margin-top:20px;background:#2563eb;color:white;font-weight:bold;padding:12px 24px;border-radius:8px;text-decoration:none;">
+              <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://skiptrace-saas.pages.dev'}" style="display:inline-block;margin-top:20px;background:#059669;color:white;font-weight:bold;padding:12px 24px;border-radius:8px;text-decoration:none;">
                 Download Results →
               </a>
               <p style="color:#6b90b5;font-size:11px;margin-top:24px;">PropyLeads · Find every owner, miss nothing.</p>
             </div>
           `,
         }),
-      }).catch(e => console.error('Email send failed:', e));
+      }).catch(() => {});
+    }
+  } catch (err: any) {
+    await getSupabaseAdmin()
+      .from('trace_jobs')
+      .update({ status: 'failed', error_message: err?.message || 'Unknown error' })
+      .eq('id', jobId);
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { records, columnMap, userId, fileName, userEmail } = body;
+
+    if (!records || !userId) {
+      return NextResponse.json({ error: 'Missing required data' }, { status: 400 });
     }
 
-    return NextResponse.json({
-      success: true,
-      hits: successfulHits,
-      total: records.length,
-      data: cleanResults,
-    });
+    const hasServiceRole = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+    let currentCredits: number | null = null;
 
-  } catch (error: any) {
-    console.error('Critical API failure:', error);
-    if (jobId) {
-      await getSupabaseAdmin()
-        .from('trace_jobs')
-        .update({ status: 'failed', error_message: error.message })
-        .eq('id', jobId);
+    if (hasServiceRole) {
+      const { data: profile, error: profileErr } = await getSupabaseAdmin()
+        .from('profiles')
+        .select('credits_balance')
+        .eq('id', userId)
+        .single();
+
+      if (profileErr || !profile) {
+        return NextResponse.json({ error: 'User profile not found' }, { status: 403 });
+      }
+      if (profile.credits_balance < records.length) {
+        return NextResponse.json({ error: `Insufficient credits. Need ${records.length}, have ${profile.credits_balance}.` }, { status: 402 });
+      }
+      currentCredits = profile.credits_balance;
     }
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+
+    const { data: job, error: jobErr } = await getSupabaseAdmin()
+      .from('trace_jobs')
+      .insert({ user_id: userId, file_name: fileName || 'Untitled', total_records: records.length, status: 'processing' })
+      .select()
+      .single();
+
+    if (jobErr || !job?.id) {
+      return NextResponse.json({ error: 'Could not create job' }, { status: 500 });
+    }
+
+    const jobId: string = job.id;
+
+    // Kick off processing in the background. waitUntil keeps the worker alive
+    // after the response is sent so processing survives client disconnects.
+    const processingPromise = runSkipTrace(jobId, records, columnMap, userId, fileName, userEmail, currentCredits);
+
+    try {
+      const { getRequestContext } = await import('@cloudflare/next-on-pages');
+      const { ctx } = getRequestContext();
+      ctx.waitUntil(processingPromise);
+    } catch {
+      // Local dev / non-Cloudflare env — fall back to fire-and-forget
+      processingPromise.catch(() => {});
+    }
+
+    return NextResponse.json({ jobId, status: 'processing' });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'Internal server error' }, { status: 500 });
   }
 }

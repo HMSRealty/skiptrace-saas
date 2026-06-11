@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react';
 import Papa from 'papaparse';
 
 const STORAGE_KEY = 'propyleads_trace_session_v2';
+const JOB_KEY = 'propyleads_active_job_v1';
 
 interface Props {
   session: any;
@@ -67,8 +68,104 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
   const [result, setResult] = useState<{ hits: number; total: number } | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tickerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearTimers = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (tickerRef.current) { clearInterval(tickerRef.current); tickerRef.current = null; }
+  };
+
+  const startProgressTicker = (estimatedMs: number, startedAtMs: number) => {
+    const statusMsgs = [
+      { at: 0,  text: 'Searching records...' },
+      { at: 18, text: 'Extracting phone numbers...' },
+      { at: 35, text: 'Retrying missed results...' },
+      { at: 52, text: 'Cross-referencing addresses...' },
+      { at: 68, text: 'Deep retry in progress...' },
+      { at: 82, text: 'Final sweep running...' },
+      { at: 93, text: 'Packaging your results...' },
+    ];
+    if (tickerRef.current) clearInterval(tickerRef.current);
+    tickerRef.current = setInterval(() => {
+      const elapsed = Date.now() - startedAtMs;
+      const pct = Math.min((elapsed / estimatedMs) * 92, 92);
+      setProcessingPct(Math.round(pct));
+      const current = [...statusMsgs].reverse().find(s => pct >= s.at);
+      if (current) setProcessingMsg(current.text);
+      setEtaSeconds(Math.max(0, Math.ceil((estimatedMs - elapsed) / 1000)));
+    }, 400);
+  };
+
+  const finishWithJob = (job: any) => {
+    clearTimers();
+    setProcessingPct(100);
+    setProcessingMsg('Done!');
+
+    if (job.status === 'completed' && job.data) {
+      const csvOut = Papa.unparse(job.data);
+      const blob = new Blob([csvOut], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      setDownloadUrl(url);
+      setResult({ hits: job.successfulHits ?? 0, total: job.totalRecords ?? 0 });
+      setStep('done');
+      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+      try { localStorage.removeItem(JOB_KEY); } catch {}
+      setActiveJobId(null);
+    } else if (job.status === 'failed') {
+      setError(job.error || 'Skip trace failed.');
+      setStep('map');
+      try { localStorage.removeItem(JOB_KEY); } catch {}
+      setActiveJobId(null);
+    }
+  };
+
+  const startPolling = (jobId: string, estimatedMs: number) => {
+    const savedJob = (() => { try { return JSON.parse(localStorage.getItem(JOB_KEY) || 'null'); } catch { return null; } });
+    const data = savedJob() || { startedAt: Date.now(), estimatedMs };
+    startProgressTicker(data.estimatedMs || estimatedMs, data.startedAt || Date.now());
+
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}?userId=${encodeURIComponent(session.user.id)}`);
+        if (!res.ok) return;
+        const job = await res.json();
+        if (job.status === 'completed' || job.status === 'failed') {
+          finishWithJob(job);
+        }
+      } catch {}
+    }, 3000);
+  };
+
+  // Resume an in-progress job on mount
+  useEffect(() => {
+    let saved: any = null;
+    try { saved = JSON.parse(localStorage.getItem(JOB_KEY) || 'null'); } catch {}
+    if (!saved?.jobId) return;
+    setActiveJobId(saved.jobId);
+    setStep('processing');
+    setFileName(saved.fileName || 'Resuming...');
+    // Restore totals so the UI counter is right
+    if (saved.totalRecords) setFullData(new Array(saved.totalRecords).fill({}));
+    startPolling(saved.jobId, saved.estimatedMs || 60000);
+
+    // Also try an immediate fetch in case it already finished
+    (async () => {
+      try {
+        const res = await fetch(`/api/jobs/${saved.jobId}?userId=${encodeURIComponent(session.user.id)}`);
+        if (res.ok) {
+          const job = await res.json();
+          if (job.status === 'completed' || job.status === 'failed') finishWithJob(job);
+        }
+      } catch {}
+    })();
+
+    return () => clearTimers();
+  }, []);
 
   const handleFile = (selectedFile: File) => {
     if (!selectedFile.name.endsWith('.csv')) {
@@ -124,38 +221,11 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
 
     setStep('processing');
     setError('');
+    setProcessingPct(0);
+    setProcessingMsg('Starting...');
 
     const estimatedMs = Math.max(15000, fullData.length * 3000);
-    const statusMsgs = [
-      { at: 0,  text: 'Searching records...' },
-      { at: 18, text: 'Extracting phone numbers...' },
-      { at: 35, text: 'Retrying missed results...' },
-      { at: 52, text: 'Cross-referencing addresses...' },
-      { at: 68, text: 'Deep retry in progress...' },
-      { at: 82, text: 'Final sweep running...' },
-      { at: 93, text: 'Packaging your results...' },
-    ];
-
-    let pct = 0;
-    setProcessingPct(0);
-    setProcessingMsg(statusMsgs[0].text);
-    setEtaSeconds(Math.round(estimatedMs / 1000));
-
-    const tickMs = 400;
-    const increment = (tickMs / estimatedMs) * 92;
     const startedAt = Date.now();
-
-    const ticker = setInterval(() => {
-      pct = Math.min(pct + increment, 92);
-      setProcessingPct(Math.round(pct));
-      const current = [...statusMsgs].reverse().find(s => pct >= s.at);
-      if (current) setProcessingMsg(current.text);
-      const elapsed = Date.now() - startedAt;
-      const remainingMs = Math.max(0, estimatedMs - elapsed);
-      setEtaSeconds(Math.ceil(remainingMs / 1000));
-    }, tickMs);
-
-    const interval = { clear: () => clearInterval(ticker) };
 
     try {
       const response = await fetch('/api/skiptrace', {
@@ -164,23 +234,26 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
         body: JSON.stringify({ records: fullData, columnMap, userId: session.user.id, fileName: fileName || file?.name, userEmail: session.user.email }),
       });
 
-      interval.clear();
-      setProcessingPct(100);
-      setProcessingMsg('Done!');
       const data = await response.json();
+      if (!response.ok || !data.jobId) {
+        throw new Error(data.error || 'Could not start skip trace.');
+      }
 
-      if (!response.ok) throw new Error(data.error || 'Processing failed');
+      const jobId = data.jobId;
+      setActiveJobId(jobId);
+      try {
+        localStorage.setItem(JOB_KEY, JSON.stringify({
+          jobId,
+          startedAt,
+          estimatedMs,
+          totalRecords: fullData.length,
+          fileName: fileName || file?.name || '',
+        }));
+      } catch {}
 
-      const csvOut = Papa.unparse(data.data);
-      const blob = new Blob([csvOut], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
-      setResult({ hits: data.hits, total: data.total });
-      setStep('done');
-      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+      startPolling(jobId, estimatedMs);
     } catch (err: any) {
-      interval.clear();
-      setError(err.message);
+      setError(err.message || 'Could not start skip trace.');
       setStep('map');
     }
   };
@@ -194,6 +267,8 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
   };
 
   const reset = () => {
+    clearTimers();
+    setActiveJobId(null);
     setStep('upload');
     setFile(null);
     setFileName('');
@@ -204,6 +279,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     setDownloadUrl(null);
     setError('');
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    try { localStorage.removeItem(JOB_KEY); } catch {}
   };
 
   const mapLabels: Record<string, string> = {

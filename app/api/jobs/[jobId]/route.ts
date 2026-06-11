@@ -18,7 +18,7 @@ export async function GET(
 
     const { data: job, error } = await getSupabaseAdmin()
       .from('trace_jobs')
-      .select('result_data, file_name, user_id, status')
+      .select('id, status, file_name, total_records, successful_hits, credits_used, result_data, error_message, user_id, created_at')
       .eq('id', jobId)
       .single();
 
@@ -26,18 +26,23 @@ export async function GET(
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     }
 
-    // Ensure the requesting user owns this job
     if (job.user_id !== userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
-    if (job.status !== 'completed' || !job.result_data) {
-      return NextResponse.json({ error: 'Results not available for this job' }, { status: 404 });
-    }
+    return NextResponse.json({
+      id: job.id,
+      status: job.status,
+      fileName: job.file_name,
+      totalRecords: job.total_records,
+      successfulHits: job.successful_hits,
+      creditsUsed: job.credits_used,
+      data: job.result_data,
+      error: job.error_message,
+      createdAt: job.created_at,
+    });
 
-    return NextResponse.json({ data: job.result_data, fileName: job.file_name });
-
-  } catch (error: any) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
