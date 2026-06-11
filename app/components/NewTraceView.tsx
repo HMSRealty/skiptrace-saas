@@ -15,36 +15,53 @@ interface Props {
 interface CSVRecord { [key: string]: string; }
 type Step = 'upload' | 'map' | 'processing' | 'done';
 
+function readSession() {
+  if (typeof window === 'undefined') return null;
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { return null; }
+}
+function readActiveJob() {
+  if (typeof window === 'undefined') return null;
+  try { return JSON.parse(localStorage.getItem(JOB_KEY) || 'null'); } catch { return null; }
+}
+
 export default function NewTraceView({ session, credits, onTraceComplete, onBuyCredits }: Props) {
-  const [step, setStep] = useState<Step>('upload');
+  // Initialize state DIRECTLY from localStorage so the first render already shows the right step.
+  const initial = (() => {
+    const job = readActiveJob();
+    const sess = readSession();
+    if (job?.jobId) {
+      return {
+        step: 'processing' as Step,
+        fileName: job.fileName || sess?.fileName || 'Resuming...',
+        headers: sess?.headers || [],
+        fullData: sess?.fullData || new Array(job.totalRecords || 0).fill({}),
+        columnMap: sess?.columnMap || null,
+      };
+    }
+    if (sess?.headers && sess?.fullData) {
+      return {
+        step: 'map' as Step,
+        fileName: sess.fileName || 'Restored list',
+        headers: sess.headers,
+        fullData: sess.fullData,
+        columnMap: sess.columnMap || null,
+      };
+    }
+    return { step: 'upload' as Step, fileName: '', headers: [], fullData: [], columnMap: null };
+  })();
+
+  const [step, setStep] = useState<Step>(initial.step);
   const [file, setFile] = useState<File | null>(null);
-  const [fileName, setFileName] = useState<string>('');
-  const [headers, setHeaders] = useState<string[]>([]);
-  const [fullData, setFullData] = useState<CSVRecord[]>([]);
-  const [previewData, setPreviewData] = useState<CSVRecord[]>([]);
+  const [fileName, setFileName] = useState<string>(initial.fileName);
+  const [headers, setHeaders] = useState<string[]>(initial.headers);
+  const [fullData, setFullData] = useState<CSVRecord[]>(initial.fullData);
+  const [previewData, setPreviewData] = useState<CSVRecord[]>(initial.fullData.slice(0, 3));
   const [dragOver, setDragOver] = useState(false);
 
-  const [columnMap, setColumnMap] = useState({
+  const [columnMap, setColumnMap] = useState(initial.columnMap || {
     firstName: '', lastName: '', street: '', city: '', state: '', zip: '',
     mailingStreet: '', mailingCity: '', mailingState: '', mailingZip: '',
   });
-
-  // Restore saved upload session on mount
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      if (saved.headers && saved.fullData) {
-        setFileName(saved.fileName || 'Restored list');
-        setHeaders(saved.headers);
-        setFullData(saved.fullData);
-        setPreviewData(saved.fullData.slice(0, 3));
-        if (saved.columnMap) setColumnMap(saved.columnMap);
-        setStep('map');
-      }
-    } catch {}
-  }, []);
 
   // Save mapping state on changes (only while in map step with data)
   useEffect(() => {
@@ -141,19 +158,14 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     }, 3000);
   };
 
-  // Resume an in-progress job on mount
+  // Resume polling if there's a saved active job
   useEffect(() => {
-    let saved: any = null;
-    try { saved = JSON.parse(localStorage.getItem(JOB_KEY) || 'null'); } catch {}
+    const saved = readActiveJob();
     if (!saved?.jobId) return;
     setActiveJobId(saved.jobId);
-    setStep('processing');
-    setFileName(saved.fileName || 'Resuming...');
-    // Restore totals so the UI counter is right
-    if (saved.totalRecords) setFullData(new Array(saved.totalRecords).fill({}));
     startPolling(saved.jobId, saved.estimatedMs || 60000);
 
-    // Also try an immediate fetch in case it already finished
+    // Also check immediately in case it already finished while we were away
     (async () => {
       try {
         const res = await fetch(`/api/jobs/${saved.jobId}?userId=${encodeURIComponent(session.user.id)}`);
@@ -165,6 +177,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     })();
 
     return () => clearTimers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleFile = (selectedFile: File) => {
