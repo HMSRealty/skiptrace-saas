@@ -27,7 +27,22 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <footer
+          className="text-center text-xs py-4 px-6"
+          style={{ color: 'var(--text-2)', borderTop: '1px solid var(--border)', background: 'var(--bg-surface)' }}
+        >
+          © {new Date().getFullYear()} PropyLeads · Need help?{' '}
+          <a
+            href="mailto:Support@Propyleads.com"
+            className="font-semibold"
+            style={{ color: 'var(--blue)' }}
+          >
+            Support@Propyleads.com
+          </a>
+        </footer>
+      </body>
     </html>
   );
 }
