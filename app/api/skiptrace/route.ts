@@ -298,17 +298,25 @@ export async function POST(request: Request) {
       currentCredits = profile.credits_balance;
     }
 
-    const { data: job, error: jobErr } = await getSupabaseAdmin()
+    const insertResult = await getSupabaseAdmin()
       .from('trace_jobs')
-      .insert({ user_id: userId, file_name: fileName || 'Untitled', total_records: records.length, status: 'processing' })
+      .insert({
+        user_id: userId,
+        file_name: fileName || 'Untitled',
+        total_records: records.length,
+        status: 'processing',
+        successful_hits: 0,
+        credits_used: 0,
+      })
       .select()
       .single();
 
-    if (jobErr || !job?.id) {
-      return NextResponse.json({ error: 'Could not create job' }, { status: 500 });
+    if (insertResult.error || !insertResult.data?.id) {
+      const detail = insertResult.error?.message || insertResult.error?.details || 'unknown';
+      return NextResponse.json({ error: `Could not create job: ${detail}` }, { status: 500 });
     }
 
-    const jobId: string = job.id;
+    const jobId: string = insertResult.data.id;
 
     // Kick off processing in the background. waitUntil keeps the worker alive
     // after the response is sent so processing survives client disconnects.
