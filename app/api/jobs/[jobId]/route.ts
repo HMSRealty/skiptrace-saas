@@ -1,13 +1,7 @@
 export const runtime = 'edge';
 
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  { auth: { autoRefreshToken: false, persistSession: false } }
-);
+import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
 
 export async function GET(
   request: Request,
@@ -22,7 +16,7 @@ export async function GET(
       return NextResponse.json({ error: 'Missing jobId or userId' }, { status: 400 });
     }
 
-    const { data: job, error } = await supabaseAdmin
+    const { data: job, error } = await getSupabaseAdmin()
       .from('trace_jobs')
       .select('result_data, file_name, user_id, status')
       .eq('id', jobId)

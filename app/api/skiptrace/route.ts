@@ -1,13 +1,7 @@
 export const runtime = 'edge';
 
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  { auth: { autoRefreshToken: false, persistSession: false } }
-);
+import { getSupabaseAdmin } from '../../lib/supabaseAdmin';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -56,7 +50,7 @@ export async function POST(request: Request) {
     let currentCredits: number | null = null;
 
     if (hasServiceRole) {
-      const { data: profile, error: profileErr } = await supabaseAdmin
+      const { data: profile, error: profileErr } = await getSupabaseAdmin()
         .from('profiles')
         .select('credits_balance')
         .eq('id', userId)
@@ -73,7 +67,7 @@ export async function POST(request: Request) {
 
     // Create job record
     try {
-      const { data: job } = await supabaseAdmin
+      const { data: job } = await getSupabaseAdmin()
         .from('trace_jobs')
         .insert({ user_id: userId, file_name: fileName || 'Untitled', total_records: records.length, status: 'processing' })
         .select()
@@ -257,7 +251,7 @@ export async function POST(request: Request) {
     // Deduct credits
     const creditsToDeduct = records.length;
     if (hasServiceRole && currentCredits !== null) {
-      await supabaseAdmin
+      await getSupabaseAdmin()
         .from('profiles')
         .update({ credits_balance: currentCredits - creditsToDeduct })
         .eq('id', userId);
@@ -265,7 +259,7 @@ export async function POST(request: Request) {
 
     // Save completed job + clean results
     if (jobId) {
-      await supabaseAdmin
+      await getSupabaseAdmin()
         .from('trace_jobs')
         .update({
           status: 'completed',
@@ -331,7 +325,7 @@ export async function POST(request: Request) {
   } catch (error: any) {
     console.error('Critical API failure:', error);
     if (jobId) {
-      await supabaseAdmin
+      await getSupabaseAdmin()
         .from('trace_jobs')
         .update({ status: 'failed', error_message: error.message })
         .eq('id', jobId);
