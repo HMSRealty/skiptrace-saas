@@ -402,7 +402,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
                   </label>
                   <select
                     value={(columnMap as any)[key]}
-                    onChange={(e) => setColumnMap(prev => ({ ...prev, [key]: e.target.value }))}
+                    onChange={(e) => setColumnMap((prev: any) => ({ ...prev, [key]: e.target.value }))}
                     className="w-full border rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm transition-all"
                     style={{ background: 'var(--bg-base)', borderColor: 'var(--border)', color: 'var(--text-1)' }}
                   >
@@ -425,7 +425,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
                     </label>
                     <select
                       value={(columnMap as any)[key]}
-                      onChange={(e) => setColumnMap(prev => ({ ...prev, [key]: e.target.value }))}
+                      onChange={(e) => setColumnMap((prev: any) => ({ ...prev, [key]: e.target.value }))}
                       className="w-full border rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm transition-all"
                       style={{ background: 'var(--bg-base)', borderColor: 'var(--border)', color: 'var(--text-1)' }}
                     >
