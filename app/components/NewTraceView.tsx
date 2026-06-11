@@ -119,68 +119,114 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     }, 400);
   };
 
-  const finishWithJob = (job: any) => {
+  const CHUNK_SIZE = 20;
+
+  const finishLocal = (allResults: any[], totalRec: number) => {
     clearTimers();
     setProcessingPct(100);
     setProcessingMsg('Done!');
+    const hits = allResults.filter((r: any) => {
+      const phone = r['Primary Phone'];
+      return phone && !['Not Found', 'No match found', 'Lookup Error'].includes(phone);
+    }).length;
+    const csvOut = Papa.unparse(allResults);
+    const blob = new Blob([csvOut], { type: 'text/csv;charset=utf-8;' });
+    setDownloadUrl(URL.createObjectURL(blob));
+    setResult({ hits, total: totalRec });
+    setStep('done');
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    try { localStorage.removeItem(JOB_KEY); } catch {}
+    setActiveJobId(null);
+  };
 
-    if (job.status === 'completed') {
-      if (job.data) {
-        const csvOut = Papa.unparse(job.data);
-        const blob = new Blob([csvOut], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        setDownloadUrl(url);
+  // Process chunks one by one. Updates localStorage after each chunk so refresh resumes.
+  const runChunkedTrace = async (
+    jobId: string,
+    records: CSVRecord[],
+    map: any,
+    startedAt: number,
+    estimatedMs: number,
+    startFromChunk: number,
+    initialResults: any[]
+  ) => {
+    startProgressTicker(estimatedMs, startedAt);
+    const chunks: CSVRecord[][] = [];
+    for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+      chunks.push(records.slice(i, i + CHUNK_SIZE));
+    }
+    let allResults = [...initialResults];
+
+    try {
+      for (let i = startFromChunk; i < chunks.length; i++) {
+        const res = await fetch('/api/skiptrace', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'chunk', records: chunks[i], columnMap: map }),
+        });
+        const j = await res.json();
+        if (!res.ok || !j.data) throw new Error(j.error || `Chunk ${i + 1} failed`);
+        allResults = allResults.concat(j.data);
+
+        // Real progress: how many records done / total
+        const done = Math.min(records.length, allResults.length);
+        const pct = Math.min(95, Math.round((done / records.length) * 95));
+        setProcessingPct(pct);
+        setProcessingMsg(`Processed ${done.toLocaleString()} of ${records.length.toLocaleString()}...`);
+
+        // Save progress to localStorage (so refresh resumes)
+        try {
+          localStorage.setItem(JOB_KEY, JSON.stringify({
+            jobId,
+            startedAt,
+            estimatedMs,
+            totalRecords: records.length,
+            fileName: fileName || file?.name || '',
+            records,
+            columnMap: map,
+            completedChunks: i + 1,
+            resultsSoFar: allResults,
+          }));
+        } catch {}
       }
-      setResult({ hits: job.successfulHits ?? 0, total: job.totalRecords ?? 0 });
-      setStep('done');
-      try { localStorage.removeItem(STORAGE_KEY); } catch {}
-      try { localStorage.removeItem(JOB_KEY); } catch {}
-      setActiveJobId(null);
-    } else if (job.status === 'failed') {
-      setError(job.error || 'Skip trace failed. Open Job History to retry.');
+
+      setProcessingMsg('Finalizing...');
+      setProcessingPct(98);
+      await fetch('/api/skiptrace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'finalize',
+          jobId,
+          userId: session.user.id,
+          allResults,
+          fileName: fileName || file?.name,
+          userEmail: session.user.email,
+        }),
+      });
+
+      finishLocal(allResults, records.length);
+    } catch (err: any) {
+      clearTimers();
+      setError(err.message || 'Skip trace failed during chunk processing.');
       setStep('map');
-      try { localStorage.removeItem(JOB_KEY); } catch {}
-      setActiveJobId(null);
     }
   };
 
-  const startPolling = (jobId: string, estimatedMs: number) => {
-    const savedJob = (() => { try { return JSON.parse(localStorage.getItem(JOB_KEY) || 'null'); } catch { return null; } });
-    const data = savedJob() || { startedAt: Date.now(), estimatedMs };
-    startProgressTicker(data.estimatedMs || estimatedMs, data.startedAt || Date.now());
-
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/jobs/${jobId}?userId=${encodeURIComponent(session.user.id)}`);
-        if (!res.ok) return;
-        const job = await res.json();
-        if (job.status === 'completed' || job.status === 'failed') {
-          finishWithJob(job);
-        }
-      } catch {}
-    }, 3000);
-  };
-
-  // Resume polling if there's a saved active job
+  // Resume in-progress chunked job on mount
   useEffect(() => {
     let saved: any = null;
     try { saved = JSON.parse(localStorage.getItem(JOB_KEY) || 'null'); } catch {}
-    if (!saved?.jobId) return;
+    if (!saved?.jobId || !saved?.records || !saved?.columnMap) return;
     setActiveJobId(saved.jobId);
-    startPolling(saved.jobId, saved.estimatedMs || 60000);
-
-    // Also check immediately in case it already finished while we were away
-    (async () => {
-      try {
-        const res = await fetch(`/api/jobs/${saved.jobId}?userId=${encodeURIComponent(session.user.id)}`);
-        if (res.ok) {
-          const job = await res.json();
-          if (job.status === 'completed' || job.status === 'failed') finishWithJob(job);
-        }
-      } catch {}
-    })();
-
+    runChunkedTrace(
+      saved.jobId,
+      saved.records,
+      saved.columnMap,
+      saved.startedAt || Date.now(),
+      saved.estimatedMs || 60000,
+      saved.completedChunks || 0,
+      saved.resultsSoFar || [],
+    );
     return () => clearTimers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -242,23 +288,28 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     setProcessingPct(0);
     setProcessingMsg('Starting...');
 
-    const estimatedMs = Math.max(15000, fullData.length * 3000);
+    const estimatedMs = Math.max(15000, fullData.length * 1500);
     const startedAt = Date.now();
 
     try {
-      const response = await fetch('/api/skiptrace', {
+      const initRes = await fetch('/api/skiptrace', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ records: fullData, columnMap, userId: session.user.id, fileName: fileName || file?.name, userEmail: session.user.email }),
+        body: JSON.stringify({
+          action: 'init',
+          userId: session.user.id,
+          fileName: fileName || file?.name,
+          totalRecords: fullData.length,
+        }),
       });
-
-      const data = await response.json();
-      if (!response.ok || !data.jobId) {
-        throw new Error(data.error || 'Could not start skip trace.');
+      const initData = await initRes.json();
+      if (!initRes.ok || !initData.jobId) {
+        throw new Error(initData.error || 'Could not start skip trace.');
       }
 
-      const jobId = data.jobId;
+      const jobId = initData.jobId;
       setActiveJobId(jobId);
+
       try {
         localStorage.setItem(JOB_KEY, JSON.stringify({
           jobId,
@@ -266,10 +317,14 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
           estimatedMs,
           totalRecords: fullData.length,
           fileName: fileName || file?.name || '',
+          records: fullData,
+          columnMap,
+          completedChunks: 0,
+          resultsSoFar: [],
         }));
       } catch {}
 
-      startPolling(jobId, estimatedMs);
+      await runChunkedTrace(jobId, fullData, columnMap, startedAt, estimatedMs, 0, []);
     } catch (err: any) {
       setError(err.message || 'Could not start skip trace.');
       setStep('map');
