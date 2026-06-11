@@ -1,6 +1,8 @@
 'use client';
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import Papa from 'papaparse';
+
+const STORAGE_KEY = 'propyleads_trace_session_v1';
 
 interface Props {
   session: any;
@@ -15,6 +17,7 @@ type Step = 'upload' | 'map' | 'processing' | 'done';
 export default function NewTraceView({ session, credits, onTraceComplete, onBuyCredits }: Props) {
   const [step, setStep] = useState<Step>('upload');
   const [file, setFile] = useState<File | null>(null);
+  const [fileName, setFileName] = useState<string>('');
   const [headers, setHeaders] = useState<string[]>([]);
   const [fullData, setFullData] = useState<CSVRecord[]>([]);
   const [previewData, setPreviewData] = useState<CSVRecord[]>([]);
@@ -24,6 +27,39 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     firstName: '', lastName: '', street: '', city: '', state: '', zip: '',
     mailingStreet: '', mailingCity: '', mailingState: '', mailingZip: '',
   });
+
+  // Restore saved upload session on mount
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved.headers && saved.fullData) {
+        setFileName(saved.fileName || 'Restored list');
+        setHeaders(saved.headers);
+        setFullData(saved.fullData);
+        setPreviewData(saved.fullData.slice(0, 3));
+        if (saved.columnMap) setColumnMap(saved.columnMap);
+        setStep('map');
+      }
+    } catch {}
+  }, []);
+
+  // Save mapping state on changes (only while in map step with data)
+  useEffect(() => {
+    if (step === 'map' && fullData.length > 0) {
+      try {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+          fileName: fileName || file?.name || '',
+          headers,
+          fullData,
+          columnMap,
+        }));
+      } catch {
+        // ignore quota errors for very large CSVs
+      }
+    }
+  }, [step, headers, fullData, columnMap, file, fileName]);
 
   const [processingMsg, setProcessingMsg] = useState('Starting...');
   const [processingPct, setProcessingPct] = useState(0);
@@ -41,6 +77,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     }
     setError('');
     setFile(selectedFile);
+    setFileName(selectedFile.name);
 
     Papa.parse(selectedFile, {
       header: true,
@@ -124,7 +161,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
       const response = await fetch('/api/skiptrace', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ records: fullData, columnMap, userId: session.user.id, fileName: file?.name, userEmail: session.user.email }),
+        body: JSON.stringify({ records: fullData, columnMap, userId: session.user.id, fileName: fileName || file?.name, userEmail: session.user.email }),
       });
 
       interval.clear();
@@ -140,6 +177,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
       setDownloadUrl(url);
       setResult({ hits: data.hits, total: data.total });
       setStep('done');
+      try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
     } catch (err: any) {
       interval.clear();
       setError(err.message);
@@ -151,19 +189,21 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     if (!downloadUrl) return;
     const link = document.createElement('a');
     link.href = downloadUrl;
-    link.download = `propyleads_${file?.name || 'results'}_${Date.now()}.csv`;
+    link.download = `propyleads_${fileName || file?.name || 'results'}_${Date.now()}.csv`;
     link.click();
   };
 
   const reset = () => {
     setStep('upload');
     setFile(null);
+    setFileName('');
     setHeaders([]);
     setFullData([]);
     setPreviewData([]);
     setResult(null);
     setDownloadUrl(null);
     setError('');
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
   };
 
   const mapLabels: Record<string, string> = {
@@ -252,7 +292,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h3 className="font-semibold text-lg" style={{ color: 'var(--navy)' }}>Map Your Columns</h3>
-                <p className="text-sm mt-0.5" style={{ color: 'var(--text-2)' }}>{file?.name} · {fullData.length.toLocaleString()} records</p>
+                <p className="text-sm mt-0.5" style={{ color: 'var(--text-2)' }}>{fileName || file?.name} · {fullData.length.toLocaleString()} records</p>
               </div>
               <button onClick={reset} className="text-sm transition-colors" style={{ color: 'var(--text-2)' }}
                 onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'var(--text-1)'}
