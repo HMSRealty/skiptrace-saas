@@ -32,11 +32,27 @@ const navItems = [
   )},
 ] as const;
 
+const VIEW_KEY = 'propyleads_active_view';
+
 export default function AppShell({ session }: Props) {
-  const [activeView, setActiveView] = useState<View>('dashboard');
+  const [activeView, _setActiveView] = useState<View>('dashboard');
   const [credits, setCredits] = useState(0);
   const [loadingCredits, setLoadingCredits] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  const setActiveView = (v: View) => {
+    _setActiveView(v);
+    try { localStorage.setItem(VIEW_KEY, v); } catch {}
+  };
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(VIEW_KEY);
+      if (saved === 'dashboard' || saved === 'new-trace' || saved === 'history' || saved === 'buy-credits') {
+        _setActiveView(saved);
+      }
+    } catch {}
+  }, []);
 
   const fetchCredits = async () => {
     setLoadingCredits(true);

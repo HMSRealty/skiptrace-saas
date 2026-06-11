@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react';
 import Papa from 'papaparse';
 
-const STORAGE_KEY = 'propyleads_trace_session_v1';
+const STORAGE_KEY = 'propyleads_trace_session_v2';
 
 interface Props {
   session: any;
@@ -31,7 +31,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
   // Restore saved upload session on mount
   useEffect(() => {
     try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       const saved = JSON.parse(raw);
       if (saved.headers && saved.fullData) {
@@ -49,7 +49,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
   useEffect(() => {
     if (step === 'map' && fullData.length > 0) {
       try {
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
           fileName: fileName || file?.name || '',
           headers,
           fullData,
@@ -177,7 +177,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
       setDownloadUrl(url);
       setResult({ hits: data.hits, total: data.total });
       setStep('done');
-      try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
+      try { localStorage.removeItem(STORAGE_KEY); } catch {}
     } catch (err: any) {
       interval.clear();
       setError(err.message);
@@ -203,7 +203,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     setResult(null);
     setDownloadUrl(null);
     setError('');
-    try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
   };
 
   const mapLabels: Record<string, string> = {
