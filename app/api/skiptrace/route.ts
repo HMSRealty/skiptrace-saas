@@ -156,8 +156,19 @@ async function runSkipTrace(
       };
     };
 
+    const sbProg = await getSupabaseAdmin();
+    const updateProgress = async (hitsSoFar: number) => {
+      try {
+        await sbProg.from('trace_jobs').update({ successful_hits: hitsSoFar }).eq('id', jobId);
+      } catch {}
+    };
+
     const cfg0 = PASS_CONFIG[0];
     let finalResults = await processWithConcurrency(records, lookupRecord, cfg0.concurrency, cfg0.batchDelay);
+
+    // Snapshot progress after first pass
+    let hits = finalResults.filter(r => !needsRetry(r.Skip_Trace_Phone)).length;
+    await updateProgress(hits);
 
     for (let pass = 1; pass < PASS_CONFIG.length; pass++) {
       const retryIndices = finalResults
@@ -177,6 +188,9 @@ async function runSkipTrace(
           finalResults[originalIdx] = retryResults[retryIdx];
         }
       });
+
+      hits = finalResults.filter(r => !needsRetry(r.Skip_Trace_Phone)).length;
+      await updateProgress(hits);
     }
 
     const cleanResults = finalResults.map(r => ({

@@ -124,18 +124,20 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     setProcessingPct(100);
     setProcessingMsg('Done!');
 
-    if (job.status === 'completed' && job.data) {
-      const csvOut = Papa.unparse(job.data);
-      const blob = new Blob([csvOut], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
+    if (job.status === 'completed') {
+      if (job.data) {
+        const csvOut = Papa.unparse(job.data);
+        const blob = new Blob([csvOut], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        setDownloadUrl(url);
+      }
       setResult({ hits: job.successfulHits ?? 0, total: job.totalRecords ?? 0 });
       setStep('done');
       try { localStorage.removeItem(STORAGE_KEY); } catch {}
       try { localStorage.removeItem(JOB_KEY); } catch {}
       setActiveJobId(null);
     } else if (job.status === 'failed') {
-      setError(job.error || 'Skip trace failed.');
+      setError(job.error || 'Skip trace failed. Open Job History to retry.');
       setStep('map');
       try { localStorage.removeItem(JOB_KEY); } catch {}
       setActiveJobId(null);
@@ -593,6 +595,18 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
                   ? `~${etaSeconds >= 60 ? `${Math.floor(etaSeconds / 60)}m ${etaSeconds % 60}s` : `${etaSeconds}s`} remaining`
                   : 'Finishing up...'}
               </p>
+            </div>
+            <div className="mt-4 pt-4 border-t flex items-center justify-between text-xs" style={{ borderColor: 'var(--border)' }}>
+              <span style={{ color: 'var(--text-2)' }}>
+                Taking longer than expected? Your job continues in the background — safe to navigate away.
+              </span>
+              <button
+                onClick={() => onTraceComplete()}
+                className="font-semibold whitespace-nowrap"
+                style={{ color: 'var(--blue)' }}
+              >
+                View Job History →
+              </button>
             </div>
           </div>
         </div>
