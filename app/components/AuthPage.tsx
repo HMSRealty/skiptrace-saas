@@ -2,10 +2,12 @@
 import { useState } from 'react';
 import { supabase } from '../supabase';
 
+type Mode = 'signin' | 'signup' | 'forgot';
+
 export default function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [mode, setMode] = useState<Mode>('signin');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -16,13 +18,19 @@ export default function AuthPage() {
     setError('');
     setSuccessMsg('');
     try {
-      if (isSignUp) {
+      if (mode === 'signup') {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
         setSuccessMsg('Account created! Check your email to confirm, then sign in.');
-      } else {
+      } else if (mode === 'signin') {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/`,
+        });
+        if (error) throw error;
+        setSuccessMsg('Password reset email sent. Check your inbox.');
       }
     } catch (err: any) {
       setError(err.message);
@@ -34,9 +42,21 @@ export default function AuthPage() {
   const features = [
     { icon: '⚡', title: 'Lightning Fast', desc: 'Process thousands of records in minutes with parallel searches' },
     { icon: '🎯', title: 'Up to 5 Retries', desc: 'Auto-retries missed records to maximize your hit rate' },
-    { icon: '📞', title: '4 Phones + Email', desc: 'Primary, secondary and tertiary numbers — never miss a contact' },
+    { icon: '📞', title: 'Primary Phone + Email', desc: 'Verified primary phone and email — never miss a contact' },
     { icon: '🔒', title: 'Secure & Private', desc: 'Bank-level encryption. Your data stays yours.' },
   ];
+
+  const headings: Record<Mode, { title: string; sub: string }> = {
+    signin:  { title: 'Welcome back',          sub: 'Sign in to your dashboard.' },
+    signup:  { title: 'Create your account',   sub: 'Get started in seconds.' },
+    forgot:  { title: 'Reset your password',   sub: 'Enter your email and we will send you a reset link.' },
+  };
+
+  const buttonText: Record<Mode, string> = {
+    signin: 'Sign In',
+    signup: 'Create Account',
+    forgot: 'Send Reset Link',
+  };
 
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--bg-base)' }}>
@@ -44,9 +64,9 @@ export default function AuthPage() {
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-16" style={{ background: 'var(--navy)' }}>
         <div>
           <div className="flex items-center gap-3 mb-16">
-            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white font-black text-xl">P</div>
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white font-black text-base">PL</div>
             <div>
-              <span className="text-white font-black text-xl tracking-tight">PropTrace</span>
+              <span className="text-white font-black text-xl tracking-tight">PropyLeads</span>
               <span className="text-blue-300 text-xs ml-2 font-medium">PRO</span>
             </div>
           </div>
@@ -85,15 +105,15 @@ export default function AuthPage() {
       <div className="flex-1 flex items-center justify-center p-8" style={{ background: 'var(--bg-base)' }}>
         <div className="w-full max-w-md">
           <div className="flex items-center gap-3 mb-10 lg:hidden">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-black text-xl" style={{ background: 'var(--navy)' }}>P</div>
-            <span className="font-black text-xl tracking-tight" style={{ color: 'var(--navy)' }}>PropTrace</span>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-black text-base" style={{ background: 'var(--navy)' }}>PL</div>
+            <span className="font-black text-xl tracking-tight" style={{ color: 'var(--navy)' }}>PropyLeads</span>
           </div>
 
           <h2 className="text-3xl font-black mb-2" style={{ color: 'var(--navy)' }}>
-            {isSignUp ? 'Create your account' : 'Welcome back'}
+            {headings[mode].title}
           </h2>
           <p className="mb-8" style={{ color: 'var(--text-2)' }}>
-            {isSignUp ? 'Get 100 free credits — no credit card required.' : 'Sign in to your dashboard.'}
+            {headings[mode].sub}
           </p>
 
           <form onSubmit={handleAuth} className="space-y-4">
@@ -106,15 +126,30 @@ export default function AuthPage() {
                 placeholder="you@example.com" required
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text-1)' }}>Password</label>
-              <input
-                type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                className="w-full border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
-                style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)', color: 'var(--text-1)' }}
-                placeholder="••••••••" required
-              />
-            </div>
+
+            {mode !== 'forgot' && (
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Password</label>
+                  {mode === 'signin' && (
+                    <button
+                      type="button"
+                      onClick={() => { setMode('forgot'); setError(''); setSuccessMsg(''); }}
+                      className="text-xs font-semibold transition-colors"
+                      style={{ color: 'var(--blue)' }}
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                  className="w-full border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
+                  style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)', color: 'var(--text-1)' }}
+                  placeholder="••••••••" required
+                />
+              </div>
+            )}
 
             {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl p-3">{error}</div>}
             {successMsg && <div className="bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl p-3">{successMsg}</div>}
@@ -124,15 +159,32 @@ export default function AuthPage() {
               className="w-full text-white font-bold py-3.5 px-6 rounded-xl transition-all hover:opacity-90 disabled:opacity-50 shadow-lg"
               style={{ background: 'var(--navy)' }}
             >
-              {loading ? 'Processing...' : isSignUp ? 'Create Account — Free' : 'Sign In'}
+              {loading ? 'Processing...' : buttonText[mode]}
             </button>
           </form>
 
           <p className="text-center mt-6 text-sm" style={{ color: 'var(--text-2)' }}>
-            {isSignUp ? 'Already have an account?' : "Don't have an account?"}
-            <button onClick={() => { setIsSignUp(!isSignUp); setError(''); }} className="ml-2 font-semibold transition-colors" style={{ color: 'var(--blue)' }}>
-              {isSignUp ? 'Sign in' : 'Sign up free'}
-            </button>
+            {mode === 'signin' && (
+              <>
+                Don&apos;t have an account?
+                <button onClick={() => { setMode('signup'); setError(''); setSuccessMsg(''); }} className="ml-2 font-semibold transition-colors" style={{ color: 'var(--blue)' }}>
+                  Sign up
+                </button>
+              </>
+            )}
+            {mode === 'signup' && (
+              <>
+                Already have an account?
+                <button onClick={() => { setMode('signin'); setError(''); setSuccessMsg(''); }} className="ml-2 font-semibold transition-colors" style={{ color: 'var(--blue)' }}>
+                  Sign in
+                </button>
+              </>
+            )}
+            {mode === 'forgot' && (
+              <button onClick={() => { setMode('signin'); setError(''); setSuccessMsg(''); }} className="font-semibold transition-colors" style={{ color: 'var(--blue)' }}>
+                ← Back to sign in
+              </button>
+            )}
           </p>
         </div>
       </div>

@@ -27,6 +27,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
 
   const [processingMsg, setProcessingMsg] = useState('Starting...');
   const [processingPct, setProcessingPct] = useState(0);
+  const [etaSeconds, setEtaSeconds] = useState(0);
   const [result, setResult] = useState<{ hits: number; total: number } | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -101,15 +102,20 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     let pct = 0;
     setProcessingPct(0);
     setProcessingMsg(statusMsgs[0].text);
+    setEtaSeconds(Math.round(estimatedMs / 1000));
 
     const tickMs = 400;
     const increment = (tickMs / estimatedMs) * 92;
+    const startedAt = Date.now();
 
     const ticker = setInterval(() => {
       pct = Math.min(pct + increment, 92);
       setProcessingPct(Math.round(pct));
       const current = [...statusMsgs].reverse().find(s => pct >= s.at);
       if (current) setProcessingMsg(current.text);
+      const elapsed = Date.now() - startedAt;
+      const remainingMs = Math.max(0, estimatedMs - elapsed);
+      setEtaSeconds(Math.ceil(remainingMs / 1000));
     }, tickMs);
 
     const interval = { clear: () => clearInterval(ticker) };
@@ -145,7 +151,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     if (!downloadUrl) return;
     const link = document.createElement('a');
     link.href = downloadUrl;
-    link.download = `leadminer_${file?.name || 'results'}_${Date.now()}.csv`;
+    link.download = `propyleads_${file?.name || 'results'}_${Date.now()}.csv`;
     link.click();
   };
 
@@ -446,9 +452,16 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
                 style={{ width: `${processingPct}%`, background: 'var(--navy)' }}
               />
             </div>
-            <p className="text-xs mt-2" style={{ color: 'var(--text-2)' }}>
-              {fullData.length.toLocaleString()} records · scanning with up to 5 retries
-            </p>
+            <div className="flex items-center justify-between mt-2">
+              <p className="text-xs" style={{ color: 'var(--text-2)' }}>
+                {fullData.length.toLocaleString()} records · scanning with up to 5 retries
+              </p>
+              <p className="text-xs font-semibold" style={{ color: 'var(--blue)' }}>
+                {etaSeconds > 0
+                  ? `~${etaSeconds >= 60 ? `${Math.floor(etaSeconds / 60)}m ${etaSeconds % 60}s` : `${etaSeconds}s`} remaining`
+                  : 'Finishing up...'}
+              </p>
+            </div>
           </div>
         </div>
       )}

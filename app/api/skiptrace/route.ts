@@ -280,13 +280,13 @@ export async function POST(request: Request) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          from: 'PropTrace <noreply@leadminer.app>',
+          from: 'PropyLeads <onboarding@resend.dev>',
           to: userEmail,
           subject: `✅ Skip trace complete — ${successfulHits.toLocaleString()} contacts found`,
           html: `
             <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#020c1b;color:#f0f6ff;padding:32px;border-radius:12px;">
               <div style="margin-bottom:24px;">
-                <span style="background:#2563eb;color:white;font-weight:900;font-size:18px;padding:6px 14px;border-radius:8px;">PropTrace</span>
+                <span style="background:#2563eb;color:white;font-weight:900;font-size:18px;padding:6px 14px;border-radius:8px;">PropyLeads</span>
               </div>
               <h2 style="font-size:24px;font-weight:900;margin:0 0 8px;">Your skip trace is done! 🎯</h2>
               <p style="color:#6b90b5;margin:0 0 24px;">Here's a summary of your results:</p>
@@ -308,7 +308,7 @@ export async function POST(request: Request) {
               <a href="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}" style="display:inline-block;margin-top:20px;background:#2563eb;color:white;font-weight:bold;padding:12px 24px;border-radius:8px;text-decoration:none;">
                 Download Results →
               </a>
-              <p style="color:#6b90b5;font-size:11px;margin-top:24px;">PropTrace · Find every owner, miss nothing.</p>
+              <p style="color:#6b90b5;font-size:11px;margin-top:24px;">PropyLeads · Find every owner, miss nothing.</p>
             </div>
           `,
         }),

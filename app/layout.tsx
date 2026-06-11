@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PropTrace — Skip Trace for Real Estate",
+  title: "PropyLeads — Skip Trace for Real Estate",
   description: "Upload your property list and get verified phones and emails in minutes.",
 };
 
