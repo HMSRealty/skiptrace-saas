@@ -64,9 +64,9 @@ export default function AuthPage() {
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-16" style={{ background: 'var(--navy)' }}>
         <div>
           <div className="flex items-center gap-3 mb-16">
-            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white font-black text-base">PL</div>
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white font-black text-base">PT</div>
             <div>
-              <span className="text-white font-black text-xl tracking-tight">PropyLeads</span>
+              <span className="text-white font-black text-xl tracking-tight">PropyTrace</span>
               <span className="text-blue-300 text-xs ml-2 font-medium">PRO</span>
             </div>
           </div>
@@ -105,8 +105,8 @@ export default function AuthPage() {
       <div className="flex-1 flex items-center justify-center p-8" style={{ background: 'var(--bg-base)' }}>
         <div className="w-full max-w-md">
           <div className="flex items-center gap-3 mb-10 lg:hidden">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-black text-base" style={{ background: 'var(--navy)' }}>PL</div>
-            <span className="font-black text-xl tracking-tight" style={{ color: 'var(--navy)' }}>PropyLeads</span>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-black text-base" style={{ background: 'var(--navy)' }}>PT</div>
+            <span className="font-black text-xl tracking-tight" style={{ color: 'var(--navy)' }}>PropyTrace</span>
           </div>
 
           <h2 className="text-3xl font-black mb-2" style={{ color: 'var(--navy)' }}>

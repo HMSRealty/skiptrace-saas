@@ -42,7 +42,7 @@ export default function BuyCreditsView({ session }: Props) {
   const customTotal = customValid ? totalPrice(customNum) : 0;
 
   const mailtoFor = (qty: number, price: number) =>
-    `mailto:Support@Propyleads.com?subject=Buy ${qty.toLocaleString()} Credits&body=Hi, I'd like to purchase ${qty.toLocaleString()} credits ($${price.toFixed(2)}). My account is ${session.user.email}.`;
+    `mailto:info@realtrack.app?subject=Buy ${qty.toLocaleString()} PropyTrace Credits&body=Hi, I'd like to purchase ${qty.toLocaleString()} credits ($${price.toFixed(2)}). My account is ${session.user.email}.`;
 
   return (
     <div className="max-w-5xl mx-auto space-y-8">

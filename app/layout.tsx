@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PropyLeads — Skip Trace for Real Estate",
+  title: "PropyTrace — Skip Trace for Real Estate",
   description: "Upload your property list and get verified phones and emails in minutes.",
 };
 
@@ -33,13 +33,13 @@ export default function RootLayout({
           className="text-center text-xs py-4 px-6"
           style={{ color: 'var(--text-2)', borderTop: '1px solid var(--border)', background: 'var(--bg-surface)' }}
         >
-          © {new Date().getFullYear()} PropyLeads · Need help?{' '}
+          © {new Date().getFullYear()} PropyTrace · Need help?{' '}
           <a
-            href="mailto:Support@Propyleads.com"
+            href="mailto:info@realtrack.app"
             className="font-semibold"
             style={{ color: 'var(--blue)' }}
           >
-            Support@Propyleads.com
+            info@realtrack.app
           </a>
         </footer>
       </body>

@@ -170,7 +170,7 @@ async function readRapidApiKey(): Promise<string> {
     const env = (getRequestContext().env as any) || {};
     if (env.RAPIDAPI_KEY) return env.RAPIDAPI_KEY;
   } catch {}
-  return '2de62f0d4amsh2b0e7594ee9669cp151485jsn485c24390d66';
+  return '';
 }
 
 async function readResendKey(): Promise<string | undefined> {
@@ -290,13 +290,13 @@ export async function POST(request: Request) {
           method: 'POST',
           headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            from: 'PropyLeads <onboarding@resend.dev>',
+            from: 'PropyTrace <onboarding@resend.dev>',
             to: userEmail,
             subject: `✅ Skip trace complete — ${successfulHits.toLocaleString()} contacts found`,
             html: `
               <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;background:#020c1b;color:#f0f6ff;padding:32px;border-radius:12px;">
                 <div style="margin-bottom:24px;">
-                  <span style="background:#059669;color:white;font-weight:900;font-size:18px;padding:6px 14px;border-radius:8px;">PropyLeads</span>
+                  <span style="background:#059669;color:white;font-weight:900;font-size:18px;padding:6px 14px;border-radius:8px;">PropyTrace</span>
                 </div>
                 <h2 style="font-size:24px;font-weight:900;margin:0 0 8px;">Your skip trace is done! 🎯</h2>
                 <p style="color:#6b90b5;margin:0 0 24px;">Here's a summary of your results:</p>
@@ -315,10 +315,10 @@ export async function POST(request: Request) {
                   </div>
                 </div>
                 <p style="color:#6b90b5;font-size:13px;">File: <strong style="color:#f0f6ff;">${fileName || 'Your list'}</strong></p>
-                <a href="https://skiptrace-saas.pages.dev" style="display:inline-block;margin-top:20px;background:#059669;color:white;font-weight:bold;padding:12px 24px;border-radius:8px;text-decoration:none;">
+                <a href="https://propytrace.pages.dev" style="display:inline-block;margin-top:20px;background:#059669;color:white;font-weight:bold;padding:12px 24px;border-radius:8px;text-decoration:none;">
                   Download Results →
                 </a>
-                <p style="color:#6b90b5;font-size:11px;margin-top:24px;">PropyLeads · Find every owner, miss nothing.</p>
+                <p style="color:#6b90b5;font-size:11px;margin-top:24px;">PropyTrace · Find every owner, miss nothing.</p>
               </div>
             `,
           }),

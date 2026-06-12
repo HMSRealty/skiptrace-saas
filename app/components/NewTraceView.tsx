@@ -2,8 +2,8 @@
 import { useEffect, useState, useRef } from 'react';
 import Papa from 'papaparse';
 
-const STORAGE_KEY = 'propyleads_trace_session_v2';
-const JOB_KEY = 'propyleads_active_job_v1';
+const STORAGE_KEY = 'propytrace_trace_session_v2';
+const JOB_KEY = 'propytrace_active_job_v1';
 
 interface Props {
   session: any;
@@ -335,7 +335,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     if (!downloadUrl) return;
     const link = document.createElement('a');
     link.href = downloadUrl;
-    link.download = `propyleads_${fileName || file?.name || 'results'}_${Date.now()}.csv`;
+    link.download = `propytrace_${fileName || file?.name || 'results'}_${Date.now()}.csv`;
     link.click();
   };
 

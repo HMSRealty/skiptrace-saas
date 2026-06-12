@@ -32,7 +32,7 @@ const navItems = [
   )},
 ] as const;
 
-const VIEW_KEY = 'propyleads_active_view';
+const VIEW_KEY = 'propytrace_active_view';
 
 export default function AppShell({ session }: Props) {
   const [activeView, _setActiveView] = useState<View>('dashboard');
@@ -74,10 +74,10 @@ export default function AppShell({ session }: Props) {
       >
         {/* Logo */}
         <div className="h-16 flex items-center px-4 gap-3" style={{ borderBottom: '1px solid var(--border)' }}>
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-black text-sm shrink-0" style={{ background: 'var(--navy)' }}>PL</div>
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-black text-sm shrink-0" style={{ background: 'var(--navy)' }}>PT</div>
           {sidebarOpen && (
             <div className="flex items-center gap-2">
-              <span className="font-black text-base tracking-tight" style={{ color: 'var(--navy)' }}>PropyLeads</span>
+              <span className="font-black text-base tracking-tight" style={{ color: 'var(--navy)' }}>PropyTrace</span>
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--blue-light)', color: 'var(--blue)' }}>PRO</span>
             </div>
           )}
