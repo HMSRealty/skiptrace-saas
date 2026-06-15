@@ -76,7 +76,8 @@ type Candidate = { personId: string; name: string; livesIn: string; usedToLive: 
 
 // How many candidate people to try (deep) before giving up on a record.
 // Higher = better hit rate, more API calls per hard record. Easy hits stop at #1.
-const MAX_CANDIDATES = 10;
+// Kept modest to stay within Cloudflare's per-invocation subrequest budget.
+const MAX_CANDIDATES = 5;
 
 // Detect business/entity owners (LLC, Trust, Estate, …) — these can't be matched
 // by a person search, so we trace them via the property address instead.
@@ -329,31 +330,22 @@ async function processWithConcurrency(items: any[], handler: (i: any) => Promise
   return results;
 }
 
-// Concurrency is high to saturate the 45 req/s token bucket; the limiter — not
-// these delays — governs actual request rate, so delays are 0.
-const PASS_CONFIG = [
-  { concurrency: 40, batchDelay: 0, preDelay: 0 },
-  { concurrency: 40, batchDelay: 0, preDelay: 300 },
-];
+// Modest concurrency: avoids bursting past the API's per-second limit (which
+// caused mass 429 → "Lookup Error") and keeps subrequests within Cloudflare's
+// per-invocation budget. The deep-candidate logic handles retries internally,
+// so no separate retry pass is needed (that would double subrequests).
+const CONCURRENCY = 6;
 
-// Process one chunk of raw rows → clean results (with waterfall + retry passes).
+// Process one chunk of raw rows → clean results.
 export async function processChunk(records: any[], columnMap: any, apiKey: string): Promise<any[]> {
   const lookup = buildLookup(columnMap, apiKey);
-  let results = await processWithConcurrency(records, lookup, PASS_CONFIG[0].concurrency, PASS_CONFIG[0].batchDelay);
-
-  for (let pass = 1; pass < PASS_CONFIG.length; pass++) {
-    const retryIdx = results.map((r, i) => needsRetry(r.Skip_Trace_Phone) ? i : -1).filter(i => i !== -1);
-    if (retryIdx.length === 0) break;
-    const cfg = PASS_CONFIG[pass];
-    await sleep(cfg.preDelay);
-    const retryRows = retryIdx.map(i => records[i]);
-    const retryResults = await processWithConcurrency(retryRows, lookup, cfg.concurrency, cfg.batchDelay);
-    retryIdx.forEach((orig, k) => { if (!needsRetry(retryResults[k].Skip_Trace_Phone)) results[orig] = retryResults[k]; });
-  }
+  const results = await processWithConcurrency(records, lookup, CONCURRENCY, 0);
   return results.map(cleanResult);
 }
 
-export const CHUNK_SIZE = 40;
+// Small chunk so a single worker invocation stays well under Cloudflare's
+// subrequest cap: ~CHUNK_SIZE × (1 search + up to MAX_CANDIDATES details).
+export const CHUNK_SIZE = 6;
 
 // Publish a QStash message that will POST {jobId, secret} to /api/process.
 export async function enqueueProcess(jobId: string, delaySeconds = 0): Promise<boolean> {
