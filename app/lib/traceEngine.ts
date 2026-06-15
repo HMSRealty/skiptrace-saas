@@ -55,43 +55,51 @@ async function fetchWithBackoff(url: string, opts: RequestInit, maxRetries = 3):
   }
 }
 
-async function searchByName(
-  fullName: string, cityStateZip: string, street: string, apiKey: string
-): Promise<{ personId: string | null; matchedName: string }> {
-  let searchUrl = `https://${RAPID_HOST}/search/bynameaddress?name=${encodeURIComponent(fullName)}&citystatezip=${encodeURIComponent(cityStateZip)}&page=1`;
-  if (street) searchUrl += `&street=${encodeURIComponent(street)}`;
+type Candidate = { personId: string; name: string };
 
-  const res = await fetchWithBackoff(searchUrl, {
-    method: 'GET', headers: { 'x-rapidapi-host': RAPID_HOST, 'x-rapidapi-key': apiKey },
-  });
-  if (!res.ok) {
-    console.error(`[engine] search ${res.status} for "${fullName}"`);
-    throw new Error(`Search API ${res.status}`);
-  }
-  const json = await res.json();
-  if (json.PeopleDetails?.length > 0) {
-    return { personId: json.PeopleDetails[0]['Person ID'] ?? null, matchedName: json.PeopleDetails[0].Name || fullName };
-  }
-  return { personId: null, matchedName: fullName };
+// Strip suffixes and collapse to first+last for a broader fallback query.
+function normalizeName(fullName: string): string {
+  const cleaned = fullName
+    .replace(/[.,]/g, ' ')
+    .replace(/\b(jr|sr|ii|iii|iv|v|md|phd|esq|dr|mr|mrs|ms)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const parts = cleaned.split(' ').filter(Boolean);
+  if (parts.length >= 3) return `${parts[0]} ${parts[parts.length - 1]}`; // first + last
+  return cleaned;
 }
 
-// Address-only search: returns the first person associated with an address.
-async function searchByAddress(
+function extractCandidates(json: any, max = 5): Candidate[] {
+  const out: Candidate[] = [];
+  if (Array.isArray(json?.PeopleDetails)) {
+    for (const p of json.PeopleDetails) {
+      const id = p['Person ID'];
+      if (id) out.push({ personId: id, name: p.Name || '' });
+      if (out.length >= max) break;
+    }
+  }
+  return out;
+}
+
+// Name search → list of candidate people (not just the first).
+async function searchByNameCandidates(
+  fullName: string, cityStateZip: string, street: string, apiKey: string
+): Promise<Candidate[]> {
+  let url = `https://${RAPID_HOST}/search/bynameaddress?name=${encodeURIComponent(fullName)}&citystatezip=${encodeURIComponent(cityStateZip)}&page=1`;
+  if (street) url += `&street=${encodeURIComponent(street)}`;
+  const res = await fetchWithBackoff(url, { method: 'GET', headers: { 'x-rapidapi-host': RAPID_HOST, 'x-rapidapi-key': apiKey } });
+  if (!res.ok) { console.error(`[engine] search ${res.status} for "${fullName}"`); throw new Error(`Search API ${res.status}`); }
+  return extractCandidates(await res.json());
+}
+
+// Address search → list of candidate people.
+async function searchByAddressCandidates(
   street: string, cityStateZip: string, apiKey: string
-): Promise<{ personId: string | null; matchedName: string }> {
+): Promise<Candidate[]> {
   const url = `https://${RAPID_HOST}/search/byaddress?street=${encodeURIComponent(street)}&citystatezip=${encodeURIComponent(cityStateZip)}`;
-  const res = await fetchWithBackoff(url, {
-    method: 'GET', headers: { 'x-rapidapi-host': RAPID_HOST, 'x-rapidapi-key': apiKey },
-  });
-  if (!res.ok) {
-    console.error(`[engine] address search ${res.status} for "${street}"`);
-    throw new Error(`Address API ${res.status}`);
-  }
-  const json = await res.json();
-  if (json.PeopleDetails?.length > 0) {
-    return { personId: json.PeopleDetails[0]['Person ID'] ?? null, matchedName: json.PeopleDetails[0].Name || '' };
-  }
-  return { personId: null, matchedName: '' };
+  const res = await fetchWithBackoff(url, { method: 'GET', headers: { 'x-rapidapi-host': RAPID_HOST, 'x-rapidapi-key': apiKey } });
+  if (!res.ok) { console.error(`[engine] address search ${res.status} for "${street}"`); throw new Error(`Address API ${res.status}`); }
+  return extractCandidates(await res.json());
 }
 
 // Details endpoint is eventually-consistent — retry on the flaky "peo_id Not Valid".
@@ -154,42 +162,57 @@ export function buildLookup(columnMap: any, apiKey: string) {
     let ownerName = fullName;
 
     try {
-      let personId: string | null = null;
+      // ── Gather candidates across waterfall stages, deduped by Person ID ──
+      const seen = new Set<string>();
+      const candidates: Candidate[] = [];
+      const addCands = (cs: Candidate[]) => { for (const c of cs) if (!seen.has(c.personId)) { seen.add(c.personId); candidates.push(c); } };
 
       if (addressOnly) {
-        const r = await searchByAddress(street, cityStateZip, apiKey);
-        personId = r.personId;
-        matchedName = r.matchedName || '';
-        ownerName = r.matchedName || '';   // owner discovered from the address
+        addCands(await searchByAddressCandidates(street, cityStateZip, apiKey));
       } else {
-        const r = await searchByName(fullName, cityStateZip, street, apiKey);
-        personId = r.personId; matchedName = r.matchedName;
-        if (!personId && street) {
-          const fb = await searchByName(fullName, cityStateZip, '', apiKey);
-          personId = fb.personId; matchedName = fb.matchedName;
+        // Stage 2: name + street.  Stage 3: name without street.  Stage 4: normalized name.
+        if (street) addCands(await searchByNameCandidates(fullName, cityStateZip, street, apiKey));
+        if (candidates.length === 0) addCands(await searchByNameCandidates(fullName, cityStateZip, '', apiKey));
+        if (candidates.length === 0) {
+          const alt = normalizeName(fullName);
+          if (alt && alt.toLowerCase() !== fullName.toLowerCase()) {
+            addCands(await searchByNameCandidates(alt, cityStateZip, '', apiKey));
+          }
         }
       }
 
-      if (personId) {
-        const profileJson = await getPersonDetails(personId, apiKey);
-        if (profileJson) {
-          const allPhones: string[] = [];
-          const primaryTel = profileJson['Person Details']?.[0]?.Telephone?.trim?.();
-          if (primaryTel) allPhones.push(primaryTel);
-          if (profileJson['All Phone Details']?.length > 0) {
-            for (const p of profileJson['All Phone Details']) {
-              const ph = (typeof p === 'string' ? p : (p['Phone Number'] || p.Phone || p.Telephone))?.trim?.();
-              if (ph && !allPhones.includes(ph)) allPhones.push(ph);
-            }
-          }
-          if (allPhones.length > 0) { phone1 = allPhones[0]; phone2 = allPhones[1] || ''; phone3 = allPhones[2] || ''; phone4 = allPhones[3] || ''; }
-          const emails = profileJson['Email Addresses'];
-          if (emails?.length > 0) {
-            foundEmail = emails.map((e: any) => typeof e === 'string' ? e : (e.Email || e.email || JSON.stringify(e))).join(', ');
+      // ── Try each candidate (up to 4) until one yields a phone or email ──
+      let matched = false;
+      for (const cand of candidates.slice(0, 4)) {
+        const profileJson = await getPersonDetails(cand.personId, apiKey);
+        if (!profileJson) continue;
+
+        const allPhones: string[] = [];
+        const primaryTel = profileJson['Person Details']?.[0]?.Telephone?.trim?.();
+        if (primaryTel) allPhones.push(primaryTel);
+        if (profileJson['All Phone Details']?.length > 0) {
+          for (const p of profileJson['All Phone Details']) {
+            const ph = (typeof p === 'string' ? p : (p['Phone Number'] || p.Phone || p.Telephone))?.trim?.();
+            if (ph && !allPhones.includes(ph)) allPhones.push(ph);
           }
         }
-      } else {
-        phone1 = 'No match found';
+        const emails = profileJson['Email Addresses'];
+        const emailStr = emails?.length > 0
+          ? emails.map((e: any) => typeof e === 'string' ? e : (e.Email || e.email || JSON.stringify(e))).join(', ')
+          : '';
+
+        if (allPhones.length > 0 || emailStr) {
+          if (allPhones.length > 0) { phone1 = allPhones[0]; phone2 = allPhones[1] || ''; phone3 = allPhones[2] || ''; phone4 = allPhones[3] || ''; }
+          if (emailStr) foundEmail = emailStr;
+          matchedName = cand.name || matchedName;
+          if (addressOnly) ownerName = cand.name || ownerName;
+          matched = true;
+          break;
+        }
+      }
+
+      if (!matched) {
+        phone1 = candidates.length > 0 ? 'Not Found' : 'No match found';
       }
     } catch {
       phone1 = 'Lookup Error';
