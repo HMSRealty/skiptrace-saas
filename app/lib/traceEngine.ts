@@ -258,10 +258,14 @@ export function buildLookup(columnMap: any, apiKey: string) {
       // ── Rank by locality (likely owner lives in the record's city/state) ──
       const ranked = useAddress ? candidates : rankCandidates(candidates, city, state);
 
-      // ── Try candidates (deep) until one yields a phone or email ──
+      // ── Try candidates until one yields a phone or email ──
+      // Top candidate (most likely owner) gets deep flaky-retries; the rest get a
+      // single attempt to conserve the per-invocation subrequest budget.
       let matched = false;
-      for (const cand of ranked.slice(0, MAX_CANDIDATES)) {
-        const profileJson = await getPersonDetails(cand.personId, apiKey);
+      const tryList = ranked.slice(0, MAX_CANDIDATES);
+      for (let ci = 0; ci < tryList.length; ci++) {
+        const cand = tryList[ci];
+        const profileJson = await getPersonDetails(cand.personId, apiKey, ci === 0 ? 3 : 1);
         if (!profileJson) continue;
 
         const allPhones: string[] = [];
@@ -343,9 +347,9 @@ export async function processChunk(records: any[], columnMap: any, apiKey: strin
   return results.map(cleanResult);
 }
 
-// Small chunk so a single worker invocation stays well under Cloudflare's
-// subrequest cap: ~CHUNK_SIZE × (1 search + up to MAX_CANDIDATES details).
-export const CHUNK_SIZE = 6;
+// Sized so a single worker invocation stays under Cloudflare Free's 50-subrequest
+// cap. With top-candidate-only deep retries, per-record cost is low enough for ~10.
+export const CHUNK_SIZE = 10;
 
 // Publish a QStash message that will POST {jobId, secret} to /api/process.
 export async function enqueueProcess(jobId: string, delaySeconds = 0): Promise<boolean> {
