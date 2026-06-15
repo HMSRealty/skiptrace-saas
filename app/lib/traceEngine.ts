@@ -44,10 +44,27 @@ export async function readAppUrl(): Promise<string> {
   return (await readEnv('NEXT_PUBLIC_APP_URL')) || 'https://skiptrace-saas.pages.dev';
 }
 
-// Fetch wrapper with exponential backoff on 429.
-async function fetchWithBackoff(url: string, opts: RequestInit, maxRetries = 3): Promise<Response> {
+// ── Token-bucket rate limiter ───────────────────────────────────────────────
+// Plan allows 50 req/s; we pace at ~45 to stay safely under. Shared across all
+// concurrent lookups in a chunk so we use the full budget without 429s.
+const RATE_PER_SEC = 45;
+let tokens = RATE_PER_SEC;
+let lastRefill = Date.now();
+async function acquireToken(): Promise<void> {
+  for (;;) {
+    const now = Date.now();
+    tokens = Math.min(RATE_PER_SEC, tokens + ((now - lastRefill) / 1000) * RATE_PER_SEC);
+    lastRefill = now;
+    if (tokens >= 1) { tokens -= 1; return; }
+    await sleep(Math.ceil((1 - tokens) / RATE_PER_SEC * 1000));
+  }
+}
+
+// Fetch wrapper: rate-limited + exponential backoff on 429.
+async function fetchWithBackoff(url: string, opts: RequestInit, maxRetries = 4): Promise<Response> {
   let delay = 500;
   for (let attempt = 0; ; attempt++) {
+    await acquireToken();
     const res = await fetch(url, opts);
     if (res.status !== 429 || attempt >= maxRetries) return res;
     await sleep(delay);
@@ -55,7 +72,11 @@ async function fetchWithBackoff(url: string, opts: RequestInit, maxRetries = 3):
   }
 }
 
-type Candidate = { personId: string; name: string };
+type Candidate = { personId: string; name: string; livesIn: string; usedToLive: string };
+
+// How many candidate people to try (deep) before giving up on a record.
+// Higher = better hit rate, more API calls per hard record. Easy hits stop at #1.
+const MAX_CANDIDATES = 10;
 
 // Strip suffixes and collapse to first+last for a broader fallback query.
 function normalizeName(fullName: string): string {
@@ -69,16 +90,38 @@ function normalizeName(fullName: string): string {
   return cleaned;
 }
 
-function extractCandidates(json: any, max = 5): Candidate[] {
+function extractCandidates(json: any, max = 20): Candidate[] {
   const out: Candidate[] = [];
   if (Array.isArray(json?.PeopleDetails)) {
     for (const p of json.PeopleDetails) {
       const id = p['Person ID'];
-      if (id) out.push({ personId: id, name: p.Name || '' });
+      if (id) out.push({
+        personId: id,
+        name: p.Name || '',
+        livesIn: p['Lives in'] || '',
+        usedToLive: p['Used to live in'] || '',
+      });
       if (out.length >= max) break;
     }
   }
   return out;
+}
+
+// Rank candidates: those who currently live in the record's city/state first,
+// then those who used to live there. The actual owner is most likely a local.
+function rankCandidates(cands: Candidate[], city: string, state: string): Candidate[] {
+  const c = city.toLowerCase().trim();
+  const s = state.toLowerCase().trim();
+  const score = (cand: Candidate) => {
+    const lives = cand.livesIn.toLowerCase();
+    const used = cand.usedToLive.toLowerCase();
+    let sc = 0;
+    if (c && lives.includes(c)) sc += 4;
+    if (s && lives.includes(s)) sc += 2;
+    if (c && used.includes(c)) sc += 1;
+    return sc;
+  };
+  return [...cands].sort((a, b) => score(b) - score(a));
 }
 
 // Name search → list of candidate people (not just the first).
@@ -181,9 +224,12 @@ export function buildLookup(columnMap: any, apiKey: string) {
         }
       }
 
-      // ── Try each candidate (up to 4) until one yields a phone or email ──
+      // ── Rank by locality (likely owner lives in the record's city/state) ──
+      const ranked = addressOnly ? candidates : rankCandidates(candidates, city, state);
+
+      // ── Try candidates (deep) until one yields a phone or email ──
       let matched = false;
-      for (const cand of candidates.slice(0, 4)) {
+      for (const cand of ranked.slice(0, MAX_CANDIDATES)) {
         const profileJson = await getPersonDetails(cand.personId, apiKey);
         if (!profileJson) continue;
 
@@ -251,10 +297,11 @@ async function processWithConcurrency(items: any[], handler: (i: any) => Promise
   return results;
 }
 
+// Concurrency is high to saturate the 45 req/s token bucket; the limiter — not
+// these delays — governs actual request rate, so delays are 0.
 const PASS_CONFIG = [
-  { concurrency: 8, batchDelay: 100, preDelay: 0 },
-  { concurrency: 5, batchDelay: 200, preDelay: 500 },
-  { concurrency: 3, batchDelay: 300, preDelay: 800 },
+  { concurrency: 40, batchDelay: 0, preDelay: 0 },
+  { concurrency: 40, batchDelay: 0, preDelay: 300 },
 ];
 
 // Process one chunk of raw rows → clean results (with waterfall + retry passes).
@@ -274,7 +321,7 @@ export async function processChunk(records: any[], columnMap: any, apiKey: strin
   return results.map(cleanResult);
 }
 
-export const CHUNK_SIZE = 25;
+export const CHUNK_SIZE = 40;
 
 // Publish a QStash message that will POST {jobId, secret} to /api/process.
 export async function enqueueProcess(jobId: string, delaySeconds = 0): Promise<boolean> {
