@@ -347,9 +347,10 @@ export async function processChunk(records: any[], columnMap: any, apiKey: strin
   return results.map(cleanResult);
 }
 
-// Sized so a single worker invocation stays under Cloudflare Free's 50-subrequest
-// cap. With top-candidate-only deep retries, per-record cost is low enough for ~10.
-export const CHUNK_SIZE = 10;
+// Sized for the WORST case (a miss tries all candidates ≈ 8 subrequests), so an
+// all-miss chunk stays under Cloudflare Free's 50-subrequest cap: 6 × 8 = 48 < 50.
+// Easy hits cost far less; this guarantees reliability on low-hit-rate data.
+export const CHUNK_SIZE = 6;
 
 // Publish a QStash message that will POST {jobId, secret} to /api/process.
 export async function enqueueProcess(jobId: string, delaySeconds = 0): Promise<boolean> {
