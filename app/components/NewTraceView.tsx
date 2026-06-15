@@ -59,6 +59,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
   const [fullData, setFullData] = useState<CSVRecord[]>(() => readInitialState().fullData);
   const [previewData, setPreviewData] = useState<CSVRecord[]>(() => readInitialState().fullData.slice(0, 3));
   const [dragOver, setDragOver] = useState(false);
+  const [searchMode, setSearchMode] = useState<'name' | 'address'>('name');
 
   const [columnMap, setColumnMap] = useState(() => readInitialState().columnMap || {
     firstName: '', lastName: '', street: '', city: '', state: '', zip: '',
@@ -388,7 +389,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
           fileName: fileName || file?.name,
           totalRecords: fullData.length,
           records: fullData,
-          columnMap,
+          columnMap: { ...columnMap, _mode: searchMode },
           userEmail: session.user.email,
         }),
       });
@@ -411,14 +412,15 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
         startBackgroundPolling(jobId, fullData.length);
       } else {
         // Client-driven fallback (QStash not configured).
+        const mapWithMode = { ...columnMap, _mode: searchMode };
         try {
           localStorage.setItem(JOB_KEY, JSON.stringify({
             jobId, mode: 'client', startedAt, estimatedMs,
             totalRecords: fullData.length, fileName: fileName || file?.name || '',
-            records: fullData, columnMap, completedChunks: 0, resultsSoFar: [],
+            records: fullData, columnMap: mapWithMode, completedChunks: 0, resultsSoFar: [],
           }));
         } catch {}
-        await runChunkedTrace(jobId, fullData, columnMap, startedAt, estimatedMs, 0, []);
+        await runChunkedTrace(jobId, fullData, mapWithMode, startedAt, estimatedMs, 0, []);
       }
     } catch (err: any) {
       setError(err.message || 'Could not start skip trace.');
@@ -458,7 +460,9 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     mailingStreet: 'Mailing Address', mailingCity: 'Mailing City',
     mailingState: 'Mailing State', mailingZip: 'Mailing ZIP',
   };
-  const requiredFields = ['firstName', 'lastName', 'city', 'state'];
+  const requiredFields = searchMode === 'address'
+    ? ['street', 'city', 'state']
+    : ['firstName', 'lastName', 'city', 'state'];
   const mailingFields = ['mailingStreet', 'mailingCity', 'mailingState', 'mailingZip'];
   const primaryFields = ['firstName', 'lastName', 'street', 'city', 'state', 'zip'];
 
@@ -546,6 +550,35 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
               >
                 ← Change file
               </button>
+            </div>
+
+            {/* Search mode toggle */}
+            <div className="mb-5">
+              <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-2)' }}>Search method</p>
+              <div className="flex gap-2">
+                {([
+                  { id: 'name', label: 'Owner Name + Address', desc: 'Match by name & address' },
+                  { id: 'address', label: 'Address Only', desc: 'Find owner from address alone' },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setSearchMode(opt.id)}
+                    className="flex-1 text-left px-4 py-3 rounded-xl border-2 transition-all"
+                    style={{
+                      borderColor: searchMode === opt.id ? 'var(--navy)' : 'var(--border)',
+                      background: searchMode === opt.id ? 'var(--blue-light)' : 'var(--bg-base)',
+                    }}
+                  >
+                    <p className="text-sm font-bold" style={{ color: searchMode === opt.id ? 'var(--navy)' : 'var(--text-1)' }}>{opt.label}</p>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-2)' }}>{opt.desc}</p>
+                  </button>
+                ))}
+              </div>
+              {searchMode === 'address' && (
+                <p className="text-xs mt-2" style={{ color: 'var(--text-2)' }}>
+                  Address mode needs <strong>Street, City, State</strong> mapped. The owner&apos;s name is discovered automatically.
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

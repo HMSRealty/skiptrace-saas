@@ -75,6 +75,25 @@ async function searchByName(
   return { personId: null, matchedName: fullName };
 }
 
+// Address-only search: returns the first person associated with an address.
+async function searchByAddress(
+  street: string, cityStateZip: string, apiKey: string
+): Promise<{ personId: string | null; matchedName: string }> {
+  const url = `https://${RAPID_HOST}/search/byaddress?street=${encodeURIComponent(street)}&citystatezip=${encodeURIComponent(cityStateZip)}`;
+  const res = await fetchWithBackoff(url, {
+    method: 'GET', headers: { 'x-rapidapi-host': RAPID_HOST, 'x-rapidapi-key': apiKey },
+  });
+  if (!res.ok) {
+    console.error(`[engine] address search ${res.status} for "${street}"`);
+    throw new Error(`Address API ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.PeopleDetails?.length > 0) {
+    return { personId: json.PeopleDetails[0]['Person ID'] ?? null, matchedName: json.PeopleDetails[0].Name || '' };
+  }
+  return { personId: null, matchedName: '' };
+}
+
 // Details endpoint is eventually-consistent — retry on the flaky "peo_id Not Valid".
 async function getPersonDetails(personId: string, apiKey: string, maxTries = 4): Promise<any | null> {
   let delay = 400;
@@ -100,6 +119,7 @@ async function getPersonDetails(personId: string, apiKey: string, maxTries = 4):
 }
 
 export function buildLookup(columnMap: any, apiKey: string) {
+  const addressOnly = columnMap._mode === 'address';
   return async (row: any) => {
     const firstName = row[columnMap.firstName] || '';
     const lastName  = row[columnMap.lastName]  || '';
@@ -108,28 +128,46 @@ export function buildLookup(columnMap: any, apiKey: string) {
     const state  = row[columnMap.state]  || row[columnMap.mailingState]  || '';
     const zip    = row[columnMap.zip]    || row[columnMap.mailingZip]    || '';
 
-    if (!firstName || !lastName || !city || !state) {
-      return {
-        _firstName: firstName, _lastName: lastName,
-        _street: row[columnMap.street] || '', _city: city, _state: state, _zip: row[columnMap.zip] || '',
-        _mailingStreet: row[columnMap.mailingStreet] || '', _mailingCity: row[columnMap.mailingCity] || '',
-        _mailingState: row[columnMap.mailingState] || '', _mailingZip: row[columnMap.mailingZip] || '',
+    const base = {
+      _firstName: firstName, _lastName: lastName,
+      _street: row[columnMap.street] || '', _city: city, _state: state, _zip: row[columnMap.zip] || '',
+      _mailingStreet: row[columnMap.mailingStreet] || '', _mailingCity: row[columnMap.mailingCity] || '',
+      _mailingState: row[columnMap.mailingState] || '', _mailingZip: row[columnMap.mailingZip] || '',
+    };
+
+    // Validation differs by mode.
+    if (addressOnly) {
+      if (!street || !city || !state) {
+        return { ...base, _ownerName: '', Skip_Trace_Phone: 'Skipped: Missing Address/City/State',
+          _phone2: '', _phone3: '', _phone4: '', _email: 'N/A', _matchedName: 'N/A' };
+      }
+    } else if (!firstName || !lastName || !city || !state) {
+      return { ...base, _ownerName: `${firstName} ${lastName}`.trim(),
         Skip_Trace_Phone: 'Skipped: Missing Name/City/State',
-        _phone2: '', _phone3: '', _phone4: '', _email: 'N/A', _matchedName: 'N/A',
-      };
+        _phone2: '', _phone3: '', _phone4: '', _email: 'N/A', _matchedName: 'N/A' };
     }
 
     const fullName     = `${firstName} ${lastName}`.trim();
     const cityStateZip = `${city} ${state} ${zip}`.trim();
     let phone1 = 'Not Found', phone2 = '', phone3 = '', phone4 = '';
     let foundEmail = 'Not Found', matchedName = fullName;
+    let ownerName = fullName;
 
     try {
-      let { personId, matchedName: mName } = await searchByName(fullName, cityStateZip, street, apiKey);
-      matchedName = mName;
-      if (!personId && street) {
-        const fb = await searchByName(fullName, cityStateZip, '', apiKey);
-        personId = fb.personId; matchedName = fb.matchedName;
+      let personId: string | null = null;
+
+      if (addressOnly) {
+        const r = await searchByAddress(street, cityStateZip, apiKey);
+        personId = r.personId;
+        matchedName = r.matchedName || '';
+        ownerName = r.matchedName || '';   // owner discovered from the address
+      } else {
+        const r = await searchByName(fullName, cityStateZip, street, apiKey);
+        personId = r.personId; matchedName = r.matchedName;
+        if (!personId && street) {
+          const fb = await searchByName(fullName, cityStateZip, '', apiKey);
+          personId = fb.personId; matchedName = fb.matchedName;
+        }
       }
 
       if (personId) {
@@ -164,14 +202,15 @@ export function buildLookup(columnMap: any, apiKey: string) {
       _mailingStreet: row[columnMap.mailingStreet] || '', _mailingCity: row[columnMap.mailingCity] || '',
       _mailingState: row[columnMap.mailingState] || '', _mailingZip: row[columnMap.mailingZip] || '',
       Skip_Trace_Phone: phone1, _phone2: phone2, _phone3: phone3, _phone4: phone4,
-      _email: foundEmail, _matchedName: matchedName,
+      _email: foundEmail, _matchedName: matchedName, _ownerName: ownerName,
     };
   };
 }
 
 export function cleanResult(r: any) {
+  const ownerName = (r._ownerName || `${r._firstName} ${r._lastName}`).trim();
   return {
-    'Owner Full Name': `${r._firstName} ${r._lastName}`.trim(),
+    'Owner Full Name': ownerName,
     'Property Address': r._street, 'Property City': r._city, 'Property State': r._state, 'Property Zip': r._zip,
     'Mailing Address': r._mailingStreet, 'Mailing City': r._mailingCity, 'Mailing State': r._mailingState, 'Mailing Zip': r._mailingZip,
     'Primary Phone': r.Skip_Trace_Phone, 'Phone 2': r._phone2, 'Phone 3': r._phone3, 'Phone 4': r._phone4,
