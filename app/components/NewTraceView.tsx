@@ -88,6 +88,8 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [doneCancelled, setDoneCancelled] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -181,6 +183,7 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
         try {
           localStorage.setItem(JOB_KEY, JSON.stringify({
             jobId,
+            mode: 'client',
             startedAt,
             estimatedMs,
             totalRecords: records.length,
@@ -216,21 +219,101 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     }
   };
 
-  // Resume in-progress chunked job on mount
+  // Build the download + done screen from a finished job's result rows.
+  const finishFromData = (results: any[], totalRec: number, cancelled = false) => {
+    clearTimers();
+    setProcessingPct(100);
+    setProcessingMsg(cancelled ? 'Cancelled' : 'Done!');
+    const hits = (results || []).filter((r: any) => {
+      const phone = r['Primary Phone'];
+      const email = r['Email'];
+      const phoneGood = phone && !['Not Found', 'No match found', 'Lookup Error'].includes(phone) && !String(phone).startsWith('Skipped');
+      const emailGood = email && email !== 'Not Found' && email !== 'N/A';
+      return phoneGood || emailGood;
+    }).length;
+    if (results && results.length) {
+      const blob = new Blob([Papa.unparse(results)], { type: 'text/csv;charset=utf-8;' });
+      setDownloadUrl(URL.createObjectURL(blob));
+    }
+    setResult({ hits, total: totalRec });
+    setDoneCancelled(cancelled);
+    setStep('done');
+    setCancelling(false);
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    try { localStorage.removeItem(JOB_KEY); } catch {}
+    setActiveJobId(null);
+  };
+
+  // BACKGROUND MODE: QStash drives the worker. Browser just polls job status.
+  const startBackgroundPolling = (jobId: string, totalRec: number) => {
+    setProcessingMsg('Queued — processing in the background...');
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}?userId=${encodeURIComponent(session.user.id)}`);
+        if (!res.ok) return;
+        const job = await res.json();
+        // Real progress from chunk cursor.
+        if (job.totalChunks > 0) {
+          const pct = Math.min(99, Math.round((job.chunkCursor / job.totalChunks) * 100));
+          setProcessingPct(pct);
+          const done = Math.min(totalRec, job.chunkCursor * 25);
+          setProcessingMsg(
+            job.status === 'cancelled'
+              ? 'Cancelling — finishing current batch...'
+              : `Processed ${done.toLocaleString()} of ${totalRec.toLocaleString()}...`
+          );
+        }
+        if (job.status === 'completed' || job.status === 'cancelled') {
+          finishFromData(job.data || [], job.totalRecords || totalRec, job.status === 'cancelled');
+        } else if (job.status === 'failed') {
+          clearTimers();
+          setError(job.error || 'Skip trace failed.');
+          setStep('map');
+          setCancelling(false);
+          try { localStorage.removeItem(JOB_KEY); } catch {}
+        }
+      } catch {}
+    }, 3000);
+  };
+
+  // Cancel an in-flight job.
+  const handleCancel = async () => {
+    if (!activeJobId) return;
+    setCancelling(true);
+    try {
+      await fetch('/api/skiptrace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel', jobId: activeJobId, userId: session.user.id }),
+      });
+    } catch {}
+    // Background mode: polling will pick up the 'cancelled' status and finalize.
+    // Client mode: stop the local loop immediately.
+    const saved = (() => { try { return JSON.parse(localStorage.getItem(JOB_KEY) || 'null'); } catch { return null; } })();
+    if (saved?.mode === 'client') {
+      clearTimers();
+      finishFromData(saved.resultsSoFar || [], saved.totalRecords || fullData.length, true);
+    }
+  };
+
+  // Resume an in-progress job on mount (either mode)
   useEffect(() => {
     let saved: any = null;
     try { saved = JSON.parse(localStorage.getItem(JOB_KEY) || 'null'); } catch {}
-    if (!saved?.jobId || !saved?.records || !saved?.columnMap) return;
+    if (!saved?.jobId) return;
     setActiveJobId(saved.jobId);
-    runChunkedTrace(
-      saved.jobId,
-      saved.records,
-      saved.columnMap,
-      saved.startedAt || Date.now(),
-      saved.estimatedMs || 60000,
-      saved.completedChunks || 0,
-      saved.resultsSoFar || [],
-    );
+
+    if (saved.mode === 'background') {
+      if (saved.totalRecords && fullData.length === 0) setFullData(new Array(saved.totalRecords).fill({}));
+      startBackgroundPolling(saved.jobId, saved.totalRecords || 0);
+    } else if (saved.records && saved.columnMap) {
+      runChunkedTrace(
+        saved.jobId, saved.records, saved.columnMap,
+        saved.startedAt || Date.now(), saved.estimatedMs || 60000,
+        saved.completedChunks || 0, saved.resultsSoFar || [],
+      );
+    }
     return () => clearTimers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -304,6 +387,9 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
           userId: session.user.id,
           fileName: fileName || file?.name,
           totalRecords: fullData.length,
+          records: fullData,
+          columnMap,
+          userEmail: session.user.email,
         }),
       });
       const initData = await initRes.json();
@@ -314,21 +400,26 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
       const jobId = initData.jobId;
       setActiveJobId(jobId);
 
-      try {
-        localStorage.setItem(JOB_KEY, JSON.stringify({
-          jobId,
-          startedAt,
-          estimatedMs,
-          totalRecords: fullData.length,
-          fileName: fileName || file?.name || '',
-          records: fullData,
-          columnMap,
-          completedChunks: 0,
-          resultsSoFar: [],
-        }));
-      } catch {}
-
-      await runChunkedTrace(jobId, fullData, columnMap, startedAt, estimatedMs, 0, []);
+      if (initData.mode === 'background') {
+        // True background processing — survives tab close.
+        try {
+          localStorage.setItem(JOB_KEY, JSON.stringify({
+            jobId, mode: 'background', startedAt, estimatedMs,
+            totalRecords: fullData.length, fileName: fileName || file?.name || '',
+          }));
+        } catch {}
+        startBackgroundPolling(jobId, fullData.length);
+      } else {
+        // Client-driven fallback (QStash not configured).
+        try {
+          localStorage.setItem(JOB_KEY, JSON.stringify({
+            jobId, mode: 'client', startedAt, estimatedMs,
+            totalRecords: fullData.length, fileName: fileName || file?.name || '',
+            records: fullData, columnMap, completedChunks: 0, resultsSoFar: [],
+          }));
+        } catch {}
+        await runChunkedTrace(jobId, fullData, columnMap, startedAt, estimatedMs, 0, []);
+      }
     } catch (err: any) {
       setError(err.message || 'Could not start skip trace.');
       setStep('map');
@@ -346,6 +437,8 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
   const reset = () => {
     clearTimers();
     setActiveJobId(null);
+    setCancelling(false);
+    setDoneCancelled(false);
     setStep('upload');
     setFile(null);
     setFileName('');
@@ -655,17 +748,27 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
                   : 'Finishing up...'}
               </p>
             </div>
-            <div className="mt-4 pt-4 border-t flex items-center justify-between text-xs" style={{ borderColor: 'var(--border)' }}>
+            <div className="mt-4 pt-4 border-t flex items-center justify-between gap-3 text-xs" style={{ borderColor: 'var(--border)' }}>
               <span style={{ color: 'var(--text-2)' }}>
-                Taking longer than expected? Your job continues in the background — safe to navigate away.
+                Your job runs in the background — safe to close this tab and come back later.
               </span>
-              <button
-                onClick={() => onTraceComplete()}
-                className="font-semibold whitespace-nowrap"
-                style={{ color: 'var(--blue)' }}
-              >
-                View Job History →
-              </button>
+              <div className="flex items-center gap-3 shrink-0">
+                <button
+                  onClick={() => onTraceComplete()}
+                  className="font-semibold whitespace-nowrap"
+                  style={{ color: 'var(--blue)' }}
+                >
+                  View Job History →
+                </button>
+                <button
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                  className="font-semibold whitespace-nowrap px-3 py-1.5 rounded-lg border transition-all disabled:opacity-50"
+                  style={{ color: '#dc2626', borderColor: '#fecaca', background: '#fef2f2' }}
+                >
+                  {cancelling ? 'Cancelling...' : 'Cancel Job'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -674,10 +777,16 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
       {/* Step 4: Done */}
       {step === 'done' && result && (
         <div className="space-y-6">
-          <div className="rounded-2xl p-8 text-center border" style={{ background: '#f0fdf4', borderColor: '#bbf7d0' }}>
-            <div className="text-5xl mb-4">🎉</div>
-            <h3 className="text-2xl font-black mb-1" style={{ color: 'var(--navy)' }}>Skip Trace Complete!</h3>
-            <p style={{ color: 'var(--text-2)' }}>Your results are ready to download.</p>
+          <div className="rounded-2xl p-8 text-center border" style={{ background: doneCancelled ? '#fffbeb' : '#f0fdf4', borderColor: doneCancelled ? '#fde68a' : '#bbf7d0' }}>
+            <div className="text-5xl mb-4">{doneCancelled ? '🛑' : '🎉'}</div>
+            <h3 className="text-2xl font-black mb-1" style={{ color: 'var(--navy)' }}>
+              {doneCancelled ? 'Job Cancelled' : 'Skip Trace Complete!'}
+            </h3>
+            <p style={{ color: 'var(--text-2)' }}>
+              {doneCancelled
+                ? 'Processing stopped. You can download the records completed so far.'
+                : 'Your results are ready to download.'}
+            </p>
           </div>
 
           <div className="grid grid-cols-3 gap-4">
@@ -696,10 +805,11 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
           <div className="flex gap-3">
             <button
               onClick={handleDownload}
-              className="flex-1 text-white font-black py-3.5 px-6 rounded-xl transition-all hover:opacity-90 hover:scale-[1.01] text-lg shadow-lg"
+              disabled={!downloadUrl}
+              className="flex-1 text-white font-black py-3.5 px-6 rounded-xl transition-all hover:opacity-90 hover:scale-[1.01] text-lg shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
               style={{ background: 'var(--navy)' }}
             >
-              ⬇ Download Results CSV
+              {downloadUrl ? '⬇ Download Results CSV' : 'No records to download'}
             </button>
             <button
               onClick={() => { reset(); onTraceComplete(); }}
@@ -707,6 +817,13 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
               style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)', color: 'var(--text-1)' }}
             >
               View History
+            </button>
+            <button
+              onClick={reset}
+              className="px-6 py-3.5 font-semibold rounded-xl transition-all border"
+              style={{ background: 'var(--bg-surface)', borderColor: 'var(--border)', color: 'var(--text-1)' }}
+            >
+              New Trace
             </button>
           </div>
         </div>

@@ -18,7 +18,7 @@ export async function GET(
 
     const { data: job, error } = await (await getSupabaseAdmin())
       .from('trace_jobs')
-      .select('id, status, file_name, total_records, successful_hits, credits_used, result_data, error_message, user_id, created_at')
+      .select('id, status, file_name, total_records, successful_hits, credits_used, result_data, error_message, user_id, created_at, chunk_cursor, total_chunks')
       .eq('id', jobId)
       .single();
 
@@ -40,6 +40,8 @@ export async function GET(
       data: job.result_data,
       error: job.error_message,
       createdAt: job.created_at,
+      chunkCursor: job.chunk_cursor ?? 0,
+      totalChunks: job.total_chunks ?? 0,
     });
 
   } catch {
