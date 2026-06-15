@@ -32,20 +32,26 @@ export async function POST(request: Request) {
       const qstashEnabled = !!(await readQStashToken()) && Array.isArray(records) && records.length > 0;
       const totalChunks = Math.ceil(totalRecords / CHUNK_SIZE);
 
-      const insert = await sb.from('trace_jobs').insert({
+      // Base columns exist in every schema. The background columns
+      // (chunk_cursor, input_records, …) are only added when QStash is enabled,
+      // so the app keeps working even before the background_jobs.sql migration.
+      const insertRow: any = {
         user_id: userId,
         file_name: fileName || 'Untitled',
         total_records: totalRecords,
         status: 'processing',
         successful_hits: 0,
         credits_used: 0,
-        chunk_cursor: 0,
-        total_chunks: totalChunks,
-        user_email: userEmail || null,
-        input_records: qstashEnabled ? records : null,
-        column_map: qstashEnabled ? columnMap : null,
-      }).select('id').single();
+      };
+      if (qstashEnabled) {
+        insertRow.chunk_cursor = 0;
+        insertRow.total_chunks = totalChunks;
+        insertRow.user_email = userEmail || null;
+        insertRow.input_records = records;
+        insertRow.column_map = columnMap;
+      }
 
+      const insert = await sb.from('trace_jobs').insert(insertRow).select('id').single();
       if (insert.error || !insert.data?.id) {
         return NextResponse.json({ error: `Could not create job: ${insert.error?.message || 'unknown'}` }, { status: 500 });
       }

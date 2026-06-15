@@ -18,7 +18,7 @@ export async function GET(
 
     const { data: job, error } = await (await getSupabaseAdmin())
       .from('trace_jobs')
-      .select('id, status, file_name, total_records, successful_hits, credits_used, result_data, error_message, user_id, created_at, chunk_cursor, total_chunks')
+      .select('*')
       .eq('id', jobId)
       .single();
 
