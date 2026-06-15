@@ -72,7 +72,11 @@ async function searchByName(
     method: 'GET',
     headers: { 'x-rapidapi-host': RAPID_HOST, 'x-rapidapi-key': apiKey },
   });
-  if (!searchRes.ok) throw new Error(`Search API ${searchRes.status}`);
+  if (!searchRes.ok) {
+    const txt = await searchRes.text().catch(() => '');
+    console.error(`[skiptrace] search failed ${searchRes.status} for "${fullName}": ${txt.slice(0, 200)}`);
+    throw new Error(`Search API ${searchRes.status}`);
+  }
 
   const searchJson = await searchRes.json();
   if (searchJson.PeopleDetails?.length > 0) {
@@ -82,6 +86,34 @@ async function searchByName(
     };
   }
   return { personId: null, matchedName: fullName };
+}
+
+// The details endpoint is eventually-consistent: right after a search it can
+// return HTTP 200 with {"Message":"peo_id Not Valid","Person Details":[]}.
+// Retry a few times with increasing delay until real data appears.
+async function getPersonDetails(personId: string, apiKey: string, maxTries = 4): Promise<any | null> {
+  let delay = 400;
+  for (let i = 0; i < maxTries; i++) {
+    const res = await fetchWithBackoff(
+      `https://${RAPID_HOST}/search/detailsbyID?peo_id=${encodeURIComponent(personId)}`,
+      { method: 'GET', headers: { 'x-rapidapi-host': RAPID_HOST, 'x-rapidapi-key': apiKey } }
+    );
+    if (res.ok) {
+      const json = await res.json();
+      const hasData =
+        (Array.isArray(json['Person Details']) && json['Person Details'].length > 0) ||
+        (Array.isArray(json['All Phone Details']) && json['All Phone Details'].length > 0) ||
+        (Array.isArray(json['Email Addresses']) && json['Email Addresses'].length > 0);
+      if (hasData) return json;
+      // else flaky "peo_id Not Valid" — wait and retry
+    } else {
+      console.error(`[skiptrace] details failed ${res.status} for peo_id ${personId}`);
+    }
+    await sleep(delay);
+    delay = Math.round(delay * 1.8);
+  }
+  console.error(`[skiptrace] details exhausted retries for peo_id ${personId}`);
+  return null;
 }
 
 function buildLookup(columnMap: any, apiKey: string) {
@@ -127,21 +159,17 @@ function buildLookup(columnMap: any, apiKey: string) {
       }
 
       if (personId) {
-        // ── Phase 4: Extraction ───────────────────────────────────────
-        const detailsRes = await fetchWithBackoff(
-          `https://${RAPID_HOST}/search/detailsbyID?peo_id=${encodeURIComponent(personId)}`,
-          { method: 'GET', headers: { 'x-rapidapi-host': RAPID_HOST, 'x-rapidapi-key': apiKey } }
-        );
+        // ── Phase 4: Extraction (with retry on flaky "Not Valid") ──────
+        const profileJson = await getPersonDetails(personId, apiKey);
 
-        if (detailsRes.ok) {
-          const profileJson = await detailsRes.json();
+        if (profileJson) {
           const allPhones: string[] = [];
-          const primaryTel = profileJson['Person Details']?.[0]?.Telephone?.trim();
+          const primaryTel = profileJson['Person Details']?.[0]?.Telephone?.trim?.();
           if (primaryTel) allPhones.push(primaryTel);
 
           if (profileJson['All Phone Details']?.length > 0) {
             for (const p of profileJson['All Phone Details']) {
-              const phoneStr = (typeof p === 'string' ? p : (p['Phone Number'] || p.Phone || p.Telephone))?.trim();
+              const phoneStr = (typeof p === 'string' ? p : (p['Phone Number'] || p.Phone || p.Telephone))?.trim?.();
               if (phoneStr && !allPhones.includes(phoneStr)) allPhones.push(phoneStr);
             }
           }
@@ -200,6 +228,11 @@ function cleanResult(r: any) {
   };
 }
 
+// Server-only file (edge API routes never ship to the browser). Reads the
+// RAPIDAPI_KEY env var if set in Cloudflare; falls back to the known key so the
+// app works even if the env var hasn't been configured yet.
+const RAPIDAPI_KEY_FALLBACK = '2de62f0d4amsh2b0e7594ee9669cp151485jsn485c24390d66';
+
 async function readRapidApiKey(): Promise<string> {
   if (process.env.RAPIDAPI_KEY) return process.env.RAPIDAPI_KEY;
   try {
@@ -207,7 +240,7 @@ async function readRapidApiKey(): Promise<string> {
     const env = (getRequestContext().env as any) || {};
     if (env.RAPIDAPI_KEY) return env.RAPIDAPI_KEY;
   } catch {}
-  return '';
+  return RAPIDAPI_KEY_FALLBACK;
 }
 
 async function readResendKey(): Promise<string | undefined> {
