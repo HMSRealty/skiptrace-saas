@@ -78,6 +78,14 @@ type Candidate = { personId: string; name: string; livesIn: string; usedToLive: 
 // Higher = better hit rate, more API calls per hard record. Easy hits stop at #1.
 const MAX_CANDIDATES = 10;
 
+// Detect business/entity owners (LLC, Trust, Estate, …) — these can't be matched
+// by a person search, so we trace them via the property address instead.
+const ENTITY_RE = /\b(llc|l\.l\.c|inc|incorporated|corp|corporation|co|company|trust|estate|lp|llp|ltd|limited|holdings?|properties|property|partners?|partnership|associates|enterprises?|investments?|capital|group|realty|homes|ventures|management|mgmt|fund|bank|na|trustee|tr|family trust|living trust|revocable)\b/i;
+function isEntity(name: string): boolean {
+  if (!name) return false;
+  return ENTITY_RE.test(name);
+}
+
 // Strip suffixes and collapse to first+last for a broader fallback query.
 function normalizeName(fullName: string): string {
   const cleaned = fullName
@@ -186,23 +194,31 @@ export function buildLookup(columnMap: any, apiKey: string) {
       _mailingState: row[columnMap.mailingState] || '', _mailingZip: row[columnMap.mailingZip] || '',
     };
 
-    // Validation differs by mode.
-    if (addressOnly) {
+    const fullName = `${firstName} ${lastName}`.trim();
+    // Entity owners (LLC/Trust/Estate/…) can't match a person search — trace them
+    // by the property/mailing address to find the human contact behind the entity.
+    const entityOwner = !addressOnly && isEntity(fullName);
+    const useAddress = addressOnly || entityOwner;
+
+    // Validation differs by path.
+    if (useAddress) {
       if (!street || !city || !state) {
-        return { ...base, _ownerName: '', Skip_Trace_Phone: 'Skipped: Missing Address/City/State',
+        return { ...base, _ownerName: addressOnly ? '' : fullName,
+          Skip_Trace_Phone: entityOwner ? 'Skipped: Entity owner (no address to trace)' : 'Skipped: Missing Address/City/State',
           _phone2: '', _phone3: '', _phone4: '', _email: 'N/A', _matchedName: 'N/A' };
       }
     } else if (!firstName || !lastName || !city || !state) {
-      return { ...base, _ownerName: `${firstName} ${lastName}`.trim(),
+      return { ...base, _ownerName: fullName,
         Skip_Trace_Phone: 'Skipped: Missing Name/City/State',
         _phone2: '', _phone3: '', _phone4: '', _email: 'N/A', _matchedName: 'N/A' };
     }
 
-    const fullName     = `${firstName} ${lastName}`.trim();
     const cityStateZip = `${city} ${state} ${zip}`.trim();
     let phone1 = 'Not Found', phone2 = '', phone3 = '', phone4 = '';
     let foundEmail = 'Not Found', matchedName = fullName;
-    let ownerName = fullName;
+    // For entity owners keep the entity as the owner name; for pure address mode
+    // the owner is discovered from the address.
+    let ownerName = addressOnly ? '' : fullName;
 
     try {
       // ── Gather candidates across waterfall stages, deduped by Person ID ──
@@ -210,7 +226,7 @@ export function buildLookup(columnMap: any, apiKey: string) {
       const candidates: Candidate[] = [];
       const addCands = (cs: Candidate[]) => { for (const c of cs) if (!seen.has(c.personId)) { seen.add(c.personId); candidates.push(c); } };
 
-      if (addressOnly) {
+      if (useAddress) {
         addCands(await searchByAddressCandidates(street, cityStateZip, apiKey));
       } else {
         // Stage 2: name + street.  Stage 3: name without street.  Stage 4: normalized name.
@@ -225,7 +241,7 @@ export function buildLookup(columnMap: any, apiKey: string) {
       }
 
       // ── Rank by locality (likely owner lives in the record's city/state) ──
-      const ranked = addressOnly ? candidates : rankCandidates(candidates, city, state);
+      const ranked = useAddress ? candidates : rankCandidates(candidates, city, state);
 
       // ── Try candidates (deep) until one yields a phone or email ──
       let matched = false;
@@ -251,6 +267,8 @@ export function buildLookup(columnMap: any, apiKey: string) {
           if (allPhones.length > 0) { phone1 = allPhones[0]; phone2 = allPhones[1] || ''; phone3 = allPhones[2] || ''; phone4 = allPhones[3] || ''; }
           if (emailStr) foundEmail = emailStr;
           matchedName = cand.name || matchedName;
+          // Pure address mode: owner discovered from address. Entity mode: keep
+          // the entity as owner, but record the human contact as Matched Name.
           if (addressOnly) ownerName = cand.name || ownerName;
           matched = true;
           break;
