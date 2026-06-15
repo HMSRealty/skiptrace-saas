@@ -227,7 +227,21 @@ export function buildLookup(columnMap: any, apiKey: string) {
       const addCands = (cs: Candidate[]) => { for (const c of cs) if (!seen.has(c.personId)) { seen.add(c.personId); candidates.push(c); } };
 
       if (useAddress) {
-        addCands(await searchByAddressCandidates(street, cityStateZip, apiKey));
+        // Entity owners: prefer the MAILING address (where the principal receives
+        // mail) over the property address (often a rental). Fall back to property.
+        const mStreet = row[columnMap.mailingStreet] || '';
+        const mCity   = row[columnMap.mailingCity]   || '';
+        const mState  = row[columnMap.mailingState]  || '';
+        const mZip    = row[columnMap.mailingZip]    || '';
+        const useMailing = entityOwner && mStreet && mCity && mState;
+        const aStreet = useMailing ? mStreet : street;
+        const aCsz = useMailing ? `${mCity} ${mState} ${mZip}`.trim() : cityStateZip;
+
+        addCands(await searchByAddressCandidates(aStreet, aCsz, apiKey));
+        // If mailing address found nothing, also try the property address.
+        if (entityOwner && useMailing && candidates.length === 0) {
+          addCands(await searchByAddressCandidates(street, cityStateZip, apiKey));
+        }
       } else {
         // Stage 2: name + street.  Stage 3: name without street.  Stage 4: normalized name.
         if (street) addCands(await searchByNameCandidates(fullName, cityStateZip, street, apiKey));
