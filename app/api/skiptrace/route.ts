@@ -8,6 +8,30 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const needsRetry = (phone: string) =>
   ['Not Found', 'No match found', 'Lookup Error'].includes(phone);
 
+// Fetch wrapper with exponential backoff on 429 (Too Many Requests).
+// Waits 0.5s, 1s, 2s between retries before giving up.
+async function fetchWithBackoff(url: string, opts: RequestInit, maxRetries = 3): Promise<Response> {
+  let delay = 500;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, opts);
+    if (res.status !== 429 || attempt >= maxRetries) return res;
+    await sleep(delay);
+    delay *= 2;
+  }
+}
+
+// A record counts as billable only if at least one real phone OR a real email was found.
+function isBillable(r: any): boolean {
+  const phone = r['Primary Phone'];
+  const email = r['Email'];
+  const phoneGood =
+    !!phone &&
+    !needsRetry(phone) &&
+    !String(phone).startsWith('Skipped');
+  const emailGood = !!email && email !== 'Not Found' && email !== 'N/A';
+  return phoneGood || emailGood;
+}
+
 async function processWithConcurrency(
   items: any[],
   handler: (item: any) => Promise<any>,
@@ -31,6 +55,34 @@ const PASS_CONFIG = [
   { concurrency: 5, batchDelay: 200, preDelay: 500 },
   { concurrency: 3, batchDelay: 300, preDelay: 800 },
 ];
+
+const RAPID_HOST = 'skip-tracing-working-api.p.rapidapi.com';
+
+// One search request. Returns the matched Person ID + name, or null if no match.
+async function searchByName(
+  fullName: string,
+  cityStateZip: string,
+  street: string,
+  apiKey: string
+): Promise<{ personId: string | null; matchedName: string }> {
+  let searchUrl = `https://${RAPID_HOST}/search/bynameaddress?name=${encodeURIComponent(fullName)}&citystatezip=${encodeURIComponent(cityStateZip)}&page=1`;
+  if (street) searchUrl += `&street=${encodeURIComponent(street)}`;
+
+  const searchRes = await fetchWithBackoff(searchUrl, {
+    method: 'GET',
+    headers: { 'x-rapidapi-host': RAPID_HOST, 'x-rapidapi-key': apiKey },
+  });
+  if (!searchRes.ok) throw new Error(`Search API ${searchRes.status}`);
+
+  const searchJson = await searchRes.json();
+  if (searchJson.PeopleDetails?.length > 0) {
+    return {
+      personId: searchJson.PeopleDetails[0]['Person ID'] ?? null,
+      matchedName: searchJson.PeopleDetails[0].Name || fullName,
+    };
+  }
+  return { personId: null, matchedName: fullName };
+}
 
 function buildLookup(columnMap: any, apiKey: string) {
   return async (row: any) => {
@@ -63,37 +115,22 @@ function buildLookup(columnMap: any, apiKey: string) {
     let matchedName = fullName;
 
     try {
-      let searchUrl = `https://skip-tracing-working-api.p.rapidapi.com/search/bynameaddress?name=${encodeURIComponent(fullName)}&citystatezip=${encodeURIComponent(cityStateZip)}&page=1`;
-      if (street) searchUrl += `&street=${encodeURIComponent(street)}`;
+      // ── Phase 2: Strict search WITH street ──────────────────────────
+      let { personId, matchedName: mName } = await searchByName(fullName, cityStateZip, street, apiKey);
+      matchedName = mName;
 
-      const searchRes = await fetch(searchUrl, {
-        method: 'GET',
-        headers: {
-          'x-rapidapi-host': 'skip-tracing-working-api.p.rapidapi.com',
-          'x-rapidapi-key': apiKey,
-        },
-      });
-
-      if (!searchRes.ok) throw new Error(`Search API ${searchRes.status}`);
-
-      const searchJson = await searchRes.json();
-      let personId: string | null = null;
-
-      if (searchJson.PeopleDetails?.length > 0) {
-        personId    = searchJson.PeopleDetails[0]['Person ID'];
-        matchedName = searchJson.PeopleDetails[0].Name || fullName;
+      // ── Phase 3: Fallback search WITHOUT street (person may have moved)
+      if (!personId && street) {
+        const fallback = await searchByName(fullName, cityStateZip, '', apiKey);
+        personId = fallback.personId;
+        matchedName = fallback.matchedName;
       }
 
       if (personId) {
-        const detailsRes = await fetch(
-          `https://skip-tracing-working-api.p.rapidapi.com/search/detailsbyID?peo_id=${encodeURIComponent(personId)}`,
-          {
-            method: 'GET',
-            headers: {
-              'x-rapidapi-host': 'skip-tracing-working-api.p.rapidapi.com',
-              'x-rapidapi-key': apiKey,
-            },
-          }
+        // ── Phase 4: Extraction ───────────────────────────────────────
+        const detailsRes = await fetchWithBackoff(
+          `https://${RAPID_HOST}/search/detailsbyID?peo_id=${encodeURIComponent(personId)}`,
+          { method: 'GET', headers: { 'x-rapidapi-host': RAPID_HOST, 'x-rapidapi-key': apiKey } }
         );
 
         if (detailsRes.ok) {
@@ -267,24 +304,45 @@ export async function POST(request: Request) {
       }
 
       const sb = await getSupabaseAdmin();
-      const successfulHits = allResults.filter((r: any) => r['Primary Phone'] && !needsRetry(r['Primary Phone'])).length;
       const totalRecords = allResults.length;
+      // Success-based billing: only records where a phone OR email was found are charged.
+      const successfulHits = allResults.filter(isBillable).length;
+      const billable = successfulHits;
 
-      // Deduct credits
-      const { data: profile } = await sb.from('profiles').select('credits_balance').eq('id', userId).single();
-      if (profile) {
-        await sb.from('profiles').update({ credits_balance: profile.credits_balance - totalRecords }).eq('id', userId);
+      // ── Idempotency guard ───────────────────────────────────────────
+      // Atomically flip the job from 'processing' → 'completed'. Only the FIRST
+      // finalize call matches (status='processing'), so credits are deducted once
+      // even if finalize is retried or fired twice (e.g. double refresh).
+      const claim = await sb
+        .from('trace_jobs')
+        .update({
+          status: 'completed',
+          successful_hits: successfulHits,
+          credits_used: billable,
+          result_data: allResults,
+        })
+        .eq('id', jobId)
+        .eq('status', 'processing')
+        .select('id')
+        .maybeSingle();
+
+      const alreadyFinalized = !claim.data;
+
+      if (!alreadyFinalized) {
+        // Atomic decrement via RPC if present; falls back to read-modify-write.
+        const rpc = await sb.rpc('deduct_credits', { p_user_id: userId, p_amount: billable });
+        if (rpc.error) {
+          const { data: profile } = await sb.from('profiles').select('credits_balance').eq('id', userId).single();
+          if (profile) {
+            await sb.from('profiles')
+              .update({ credits_balance: Math.max(0, profile.credits_balance - billable) })
+              .eq('id', userId);
+          }
+        }
       }
 
-      await sb.from('trace_jobs').update({
-        status: 'completed',
-        successful_hits: successfulHits,
-        credits_used: totalRecords,
-        result_data: allResults,
-      }).eq('id', jobId);
-
       const resendKey = await readResendKey();
-      if (resendKey && userEmail) {
+      if (!alreadyFinalized && resendKey && userEmail) {
         const hitRate = Math.round((successfulHits / totalRecords) * 100);
         await fetch('https://api.resend.com/emails', {
           method: 'POST',
@@ -325,7 +383,7 @@ export async function POST(request: Request) {
         }).catch(() => {});
       }
 
-      return NextResponse.json({ ok: true, hits: successfulHits, total: totalRecords });
+      return NextResponse.json({ ok: true, hits: successfulHits, total: totalRecords, billed: alreadyFinalized ? 0 : billable });
     }
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });

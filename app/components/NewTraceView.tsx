@@ -125,9 +125,13 @@ export default function NewTraceView({ session, credits, onTraceComplete, onBuyC
     clearTimers();
     setProcessingPct(100);
     setProcessingMsg('Done!');
+    // Matches server-side success-based billing: a hit = a real phone OR a real email.
     const hits = allResults.filter((r: any) => {
       const phone = r['Primary Phone'];
-      return phone && !['Not Found', 'No match found', 'Lookup Error'].includes(phone);
+      const email = r['Email'];
+      const phoneGood = phone && !['Not Found', 'No match found', 'Lookup Error'].includes(phone) && !String(phone).startsWith('Skipped');
+      const emailGood = email && email !== 'Not Found' && email !== 'N/A';
+      return phoneGood || emailGood;
     }).length;
     const csvOut = Papa.unparse(allResults);
     const blob = new Blob([csvOut], { type: 'text/csv;charset=utf-8;' });
