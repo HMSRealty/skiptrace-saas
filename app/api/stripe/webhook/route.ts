@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { supabaseAdmin } from '../../../lib/supabaseAdmin';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+import { getStripe } from '../../../lib/stripe';
 
 export async function POST(request: Request) {
   const body = await request.text();
   const signature = request.headers.get('stripe-signature')!;
+
+  const stripe = getStripe();
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
   let event: Stripe.Event;
   try {
