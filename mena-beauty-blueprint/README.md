@@ -20,6 +20,7 @@ Work through the modules in order for a cold launch, or jump to the module you n
 | 5 | Copywriting & Product Pages | [`05-copywriting-product-pages.md`](./05-copywriting-product-pages.md) | Page layout, Arabic AIDA description, trust texts |
 | 6 | Traffic & Marketing | [`06-traffic-marketing.md`](./06-traffic-marketing.md) | Platform split, influencer scripts, 14-day calendar |
 | 7 | Retention & LTV | [`07-retention-ltv.md`](./07-retention-ltv.md) | WhatsApp automation, Arabic FAQ |
+| 8 | Salla / Zid Setup (Gulf) | [`08-salla-zid-setup-guide.md`](./08-salla-zid-setup-guide.md) | MENA-native platform setup + [`salla-products-import.csv`](./salla-products-import.csv) (20-product catalog) |
 
 ---
 
