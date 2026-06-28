@@ -59,8 +59,13 @@ src/
 Images are **self-hosted, on-brand SVG assets** in `public/products/`,
 `public/collections/`, and `public/hero.svg` — so the store always renders with
 no external dependency. Regenerate them with `node scripts/gen-images.mjs`.
-To use real product photos, overwrite the matching file (keep the name) or add
-`public/products/<id>.jpg` and update the path in `src/data/products.ts`.
+
+**To use real product photos** (e.g. from your AliExpress/CJ supplier listing),
+the easiest way: paste the image URL(s) into the `imageOverrides` map in
+`src/data/products.ts`, keyed by product id — e.g.
+`"sk-vitc-serum": ["https://ae01.alicdn.com/.../x.jpg"]`. Images are served
+unoptimized, so remote URLs work with no extra config. Or drop a local file at
+`public/products/<id>.jpg` and reference `/products/<id>.jpg` there.
 
 ## Deployment
 

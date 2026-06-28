@@ -4,6 +4,15 @@ This app is self-contained (its own `package.json`, no database, no external
 image dependency). Deploy it as its **own project** with the root directory set
 to `layali-store`. ~2 minutes.
 
+## One-click (Vercel)
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FHMSRealty%2Fskiptrace-saas%2Ftree%2Fclaude%2Fmena-beauty-ecommerce-blueprint-drv3rc&root-directory=layali-store&project-name=layali-store&env=NEXT_PUBLIC_WHATSAPP_NUMBER&envDescription=WhatsApp%20number%20that%20receives%20orders%20-%20digits%20only%20with%20country%20code)
+
+Click → sign in to Vercel → it pre-fills **root directory = `layali-store`** and
+prompts for `NEXT_PUBLIC_WHATSAPP_NUMBER`. Deploy → you get a live URL. (If the
+button creates a copy you'd rather avoid, use the manual import below against
+your own repo instead.)
+
 ## Option A — Vercel (recommended, easiest)
 
 1. Go to **vercel.com → Add New → Project** and import the GitHub repo
