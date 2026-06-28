@@ -54,6 +54,19 @@ src/
   lib/            # currency formatting helpers
 ```
 
+## Images
+
+Images are **self-hosted, on-brand SVG assets** in `public/products/`,
+`public/collections/`, and `public/hero.svg` — so the store always renders with
+no external dependency. Regenerate them with `node scripts/gen-images.mjs`.
+To use real product photos, overwrite the matching file (keep the name) or add
+`public/products/<id>.jpg` and update the path in `src/data/products.ts`.
+
+## Deployment
+
+See [`DEPLOY.md`](./DEPLOY.md) — deploy as its own project with root directory
+`layali-store` (Vercel/Netlify/any Node host).
+
 ## Notes
 
 - Prices are **base SAR**; AED/EGP are derived via approximate rates in `config.ts` — update to live rates.

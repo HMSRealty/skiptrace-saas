@@ -150,3 +150,27 @@ The `layali-store/` app I built can still earn its keep:
 - Or **retire it** once Salla is live — your call. Either way, all the Arabic product copy, structure, and pricing transfer 1:1 because they share the same `products` data and Module 5 copy.
 
 > **Bottom line:** Salla/Zid handles payments, COD, shipping, VAT, and operations natively for the Gulf — far less operational pain than a custom store or Shopify for this market. Build the catalog there using the CSV + Module 5 copy, solve liquids via a local 3PL (Module 2), and drive traffic per Module 6.
+
+---
+
+## 10. Zid (زد) — specifics & differences
+
+The steps above are ~95% identical on Zid. Where to look on Zid:
+
+| Task | On Zid |
+|---|---|
+| Sign up | **zid.sa** → "ابدأ الآن" (free trial; pick a plan after) |
+| Store identity | *الإعدادات → إعدادات المتجر* (logo, name, colors, domain) |
+| Payments | *المدفوعات* → enable **Zid Pay** / **Mada / Apple Pay / مدى / Tabby / Tamara / COD** |
+| Shipping | *الشحن والتوصيل* → connect **SMSA / Aramex / iMile** + COD collection |
+| Categories | *المنتجات → التصنيفات* → create the 5 collections |
+| Import products | *المنتجات → استيراد* → use Zid's Excel template; paste columns from `salla-products-import.csv` |
+| Apps | **Zid Market (متجر التطبيقات)** → reviews, upsell, WhatsApp, abandoned cart, loyalty |
+| VAT/invoices | *الإعدادات → الضرائب* → 15% VAT, ZATCA e-invoicing |
+| Theme | Zid theme store → pick a beauty/RTL theme (RTL is native) |
+
+**Salla vs Zid — quick decision:**
+- **Salla:** larger merchant ecosystem + app marketplace + marketing tools → best if you want the most plug-ins and community resources. **Default recommendation.**
+- **Zid:** excellent logistics/fulfillment focus and a clean merchant dashboard → strong if shipping/operations are your priority.
+
+Both require the same KSA prerequisites (CR, Maroof, VAT, SFDA awareness). The product CSV and all Module 5 Arabic copy import into either platform unchanged — so you can even trial both and keep whichever converts better.

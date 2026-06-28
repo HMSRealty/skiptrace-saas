@@ -43,5 +43,10 @@ export const collections: Collection[] = [
   },
 ];
 
+// Self-hosted, on-brand collection images (see scripts/gen-images.mjs).
+for (const c of collections) {
+  c.image = `/collections/${c.slug}.svg`;
+}
+
 export const collectionBySlug = (slug: string) =>
   collections.find((c) => c.slug === slug);

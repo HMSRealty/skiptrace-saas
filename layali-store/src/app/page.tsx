@@ -32,7 +32,7 @@ export default function HomePage() {
           </div>
           <div className="relative aspect-[4/3] overflow-hidden rounded-3xl shadow-soft md:aspect-square">
             <Image
-              src="https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1000&q=80"
+              src="/hero.svg"
               alt="ليالي للجمال"
               fill
               sizes="(max-width: 768px) 100vw, 50vw"
