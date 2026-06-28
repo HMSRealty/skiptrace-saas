@@ -2,13 +2,15 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { Product } from "@/data/products";
+import { Product, priceMap, compareMap } from "@/data/products";
 import { useStore } from "./StoreProvider";
 import Price from "./Price";
 import Stars from "./Stars";
 
 export default function ProductCard({ product }: { product: Product }) {
   const { addItem } = useStore();
+  const prices = priceMap(product);
+  const compare = compareMap(product);
 
   const discount =
     product.compareAt && product.compareAt > product.price
@@ -44,7 +46,7 @@ export default function ProductCard({ product }: { product: Product }) {
         </Link>
         <p className="text-sm text-plum-700/60">{product.tagline}</p>
         <div className="mt-auto flex items-center justify-between pt-2">
-          <Price amount={product.price} compareAt={product.compareAt} />
+          <Price prices={prices} compareAt={compare} />
         </div>
         <button
           onClick={() =>
@@ -52,7 +54,7 @@ export default function ProductCard({ product }: { product: Product }) {
               id: product.id,
               slug: product.slug,
               name: product.name,
-              price: product.price,
+              prices,
               image: product.image,
             })
           }

@@ -7,7 +7,7 @@ export interface CartItem {
   id: string;
   slug: string;
   name: string;
-  price: number; // base SAR
+  prices: Record<CurrencyCode, number>; // concrete price per currency
   image: string;
   qty: number;
 }
@@ -19,7 +19,7 @@ interface StoreState {
   setQty: (id: string, qty: number) => void;
   clear: () => void;
   count: number;
-  subtotal: number; // base SAR
+  subtotal: number; // in the active currency
   currencyCode: CurrencyCode;
   currency: Currency;
   setCurrencyCode: (c: CurrencyCode) => void;
@@ -40,7 +40,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const rawCart = localStorage.getItem(CART_KEY);
-      if (rawCart) setItems(JSON.parse(rawCart));
+      if (rawCart) {
+        // Keep only well-formed items (drops legacy carts from older versions
+        // that used a single `price` instead of the per-currency `prices` map).
+        const parsed = JSON.parse(rawCart);
+        const valid = Array.isArray(parsed)
+          ? parsed.filter((i) => i && typeof i === "object" && i.prices && typeof i.prices === "object")
+          : [];
+        setItems(valid);
+      }
       const rawCur = localStorage.getItem(CUR_KEY) as CurrencyCode | null;
       if (rawCur && currencies[rawCur]) setCurrencyCodeState(rawCur);
     } catch {
@@ -84,7 +92,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const clear = () => setItems([]);
 
   const count = useMemo(() => items.reduce((n, i) => n + i.qty, 0), [items]);
-  const subtotal = useMemo(() => items.reduce((s, i) => s + i.price * i.qty, 0), [items]);
+  const subtotal = useMemo(
+    () => items.reduce((s, i) => s + (i.prices?.[currencyCode] ?? 0) * i.qty, 0),
+    [items, currencyCode]
+  );
 
   const value: StoreState = {
     items,

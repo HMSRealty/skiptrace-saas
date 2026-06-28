@@ -1,13 +1,7 @@
 import { Currency } from "@/data/config";
 
-// Convert a base (SAR) price into the active currency and format it for display.
-export function formatPrice(basePrice: number, currency: Currency): string {
-  const value = Math.round(basePrice * currency.rate);
-  // Western numerals are the e-commerce standard for prices in MENA stores.
-  const formatted = value.toLocaleString("en-US");
-  return `${formatted} ${currency.symbol}`;
-}
-
-export function convert(basePrice: number, currency: Currency): number {
-  return Math.round(basePrice * currency.rate);
+// Format an amount that is ALREADY in the given currency (no conversion).
+// Western numerals are the e-commerce standard for prices in MENA stores.
+export function money(amount: number, currency: Currency): string {
+  return `${amount.toLocaleString("en-US")} ${currency.symbol}`;
 }

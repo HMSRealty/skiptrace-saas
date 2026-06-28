@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useStore } from "@/components/StoreProvider";
-import { formatPrice } from "@/lib/format";
+import { money } from "@/lib/format";
 
 export default function CartPage() {
   const { items, setQty, removeItem, subtotal, currency, hydrated } = useStore();
@@ -24,8 +24,7 @@ export default function CartPage() {
   }
 
   const threshold = currency.freeShippingThreshold;
-  const subtotalConverted = Math.round(subtotal * currency.rate);
-  const remaining = threshold - subtotalConverted;
+  const remaining = threshold - subtotal; // subtotal already in active currency
 
   return (
     <div className="container-px py-10">
@@ -40,7 +39,7 @@ export default function CartPage() {
               </Link>
               <div className="flex-1">
                 <Link href={`/products/${item.slug}`} className="font-bold text-plum-800 hover:text-blush-600">{item.name}</Link>
-                <div className="mt-1 text-sm font-semibold text-blush-600 ltr-nums">{formatPrice(item.price, currency)}</div>
+                <div className="mt-1 text-sm font-semibold text-blush-600 ltr-nums">{money(item.prices?.[currency.code] ?? 0, currency)}</div>
               </div>
               <div className="flex items-center rounded-full border border-plum-700/15">
                 <button onClick={() => setQty(item.id, item.qty - 1)} className="px-3 py-1.5 font-bold text-plum-800">−</button>
@@ -64,7 +63,7 @@ export default function CartPage() {
           )}
           <div className="flex items-center justify-between border-t border-plum-700/10 py-3">
             <span className="text-plum-700/70">المجموع الفرعي</span>
-            <span className="font-bold text-plum-900 ltr-nums">{formatPrice(subtotal, currency)}</span>
+            <span className="font-bold text-plum-900 ltr-nums">{money(subtotal, currency)}</span>
           </div>
           <p className="text-xs text-plum-700/50">تُحتسب رسوم الشحن عند الدفع</p>
           <Link href="/checkout" className="btn-primary mt-5 w-full">إتمام الطلب</Link>

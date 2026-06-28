@@ -1,29 +1,30 @@
 "use client";
 
+import { CurrencyCode } from "@/data/config";
 import { useStore } from "./StoreProvider";
-import { formatPrice } from "@/lib/format";
+import { money } from "@/lib/format";
 
 export default function Price({
-  amount,
+  prices,
   compareAt,
   className = "",
 }: {
-  amount: number; // base SAR
-  compareAt?: number;
+  prices: Record<CurrencyCode, number>;
+  compareAt?: Record<CurrencyCode, number>;
   className?: string;
 }) {
   const { currency, hydrated } = useStore();
-  // Avoid hydration mismatch: render base currency until client hydrates.
+  // Avoid hydration mismatch until the client-selected currency is known.
   if (!hydrated) {
     return <span className={className}>…</span>;
   }
+  const amount = prices[currency.code];
+  const cmp = compareAt?.[currency.code];
   return (
     <span className={`flex items-center gap-2 ${className}`}>
-      <span className="font-bold text-blush-600 ltr-nums">{formatPrice(amount, currency)}</span>
-      {compareAt && compareAt > amount && (
-        <span className="text-sm text-plum-700/40 line-through ltr-nums">
-          {formatPrice(compareAt, currency)}
-        </span>
+      <span className="font-bold text-blush-600 ltr-nums">{money(amount, currency)}</span>
+      {cmp && cmp > amount && (
+        <span className="text-sm text-plum-700/40 line-through ltr-nums">{money(cmp, currency)}</span>
       )}
     </span>
   );

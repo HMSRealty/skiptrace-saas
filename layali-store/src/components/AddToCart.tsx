@@ -2,10 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Product } from "@/data/products";
+import { Product, priceMap } from "@/data/products";
 import { useStore } from "./StoreProvider";
 import { waLink } from "./WhatsAppButton";
-import { formatPrice } from "@/lib/format";
+import { money } from "@/lib/format";
 import { brand } from "@/data/config";
 
 export default function AddToCart({ product }: { product: Product }) {
@@ -13,6 +13,7 @@ export default function AddToCart({ product }: { product: Product }) {
   const router = useRouter();
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
+  const prices = priceMap(product);
 
   const add = () => {
     addItem(
@@ -20,7 +21,7 @@ export default function AddToCart({ product }: { product: Product }) {
         id: product.id,
         slug: product.slug,
         name: product.name,
-        price: product.price,
+        prices,
         image: product.image,
       },
       qty
@@ -34,7 +35,7 @@ export default function AddToCart({ product }: { product: Product }) {
       `السلام عليكم 🌸 أرغب بطلب هذا المنتج من ${brand.name}:%0A` +
       `🛍️ ${product.name}%0A` +
       `الكمية: ${qty}%0A` +
-      `السعر: ${formatPrice(product.price * qty, currency)}`;
+      `السعر: ${money(prices[currency.code] * qty, currency)}`;
     window.open(waLink(decodeURIComponent(msg)), "_blank");
   };
 

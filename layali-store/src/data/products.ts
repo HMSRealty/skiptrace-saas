@@ -1,3 +1,5 @@
+import { CurrencyCode, currencies } from "./config";
+
 export interface Product {
   id: string;
   slug: string;
@@ -430,6 +432,53 @@ export const products: Product[] = [
 for (const p of products) {
   p.image = `/products/${p.id}.svg`;
   p.gallery = [`/products/${p.id}.svg`];
+}
+
+// Egypt-native value pricing (EGP), set per Module 4 (value tier) rather than
+// converted from Gulf prices. Gulf prices (SAR) live on each product; AED is
+// derived. Keys are product ids.
+const egpPricing: Record<string, { price: number; compareAt?: number }> = {
+  "sk-vitc-serum": { price: 399, compareAt: 599 },
+  "sk-niacinamide": { price: 349, compareAt: 499 },
+  "sk-moisturizer": { price: 449 },
+  "sk-spf50": { price: 379, compareAt: 549 },
+  "fr-hair-mist": { price: 499, compareAt: 749 },
+  "fr-body-mist-set": { price: 549, compareAt: 799 },
+  "fr-perfume-oil": { price: 299 },
+  "fr-abaya-spray": { price: 279, compareAt: 399 },
+  "mk-foundation": { price: 449, compareAt: 649 },
+  "mk-setting-spray": { price: 299 },
+  "mk-kohl": { price: 199, compareAt: 299 },
+  "mk-lip-oil": { price: 249 },
+  "hc-argan-serum": { price: 349, compareAt: 499 },
+  "hc-hair-mask": { price: 399 },
+  "hc-heatless-curls": { price: 279, compareAt: 399 },
+  "hc-rosemary-oil": { price: 299, compareAt: 449 },
+  "tl-hair-styler": { price: 1299, compareAt: 1899 },
+  "tl-ice-roller": { price: 249, compareAt: 349 },
+  "tl-ipl": { price: 1499, compareAt: 2199 },
+  "tl-body-set": { price: 349, compareAt: 499 },
+};
+
+// Concrete price per currency (no live conversion at display time).
+export function priceMap(p: Product): Record<CurrencyCode, number> {
+  const egp = egpPricing[p.id];
+  return {
+    SAR: p.price,
+    AED: Math.round(p.price * currencies.AED.rate),
+    EGP: egp ? egp.price : Math.round(p.price * currencies.EGP.rate),
+  };
+}
+
+// Concrete compare-at (strike-through) price per currency, or undefined.
+export function compareMap(p: Product): Record<CurrencyCode, number> | undefined {
+  const egp = egpPricing[p.id];
+  if (!p.compareAt && !egp?.compareAt) return undefined;
+  return {
+    SAR: p.compareAt ?? 0,
+    AED: p.compareAt ? Math.round(p.compareAt * currencies.AED.rate) : 0,
+    EGP: egp?.compareAt ?? (p.compareAt ? Math.round(p.compareAt * currencies.EGP.rate) : 0),
+  };
 }
 
 export const productBySlug = (slug: string) =>

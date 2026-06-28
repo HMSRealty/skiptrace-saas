@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { products, productBySlug, productsByCollection } from "@/data/products";
+import { products, productBySlug, productsByCollection, priceMap, compareMap } from "@/data/products";
 import { collectionBySlug } from "@/data/collections";
 import ProductGallery from "@/components/ProductGallery";
 import AddToCart from "@/components/AddToCart";
@@ -55,7 +55,7 @@ export default function ProductPage({ params }: { params: { slug: string } }) {
           <h1 className="font-display text-3xl font-extrabold leading-tight text-plum-900">{product.name}</h1>
           <Stars rating={product.rating} count={product.reviewsCount} />
           <p className="text-lg text-plum-700/80">{product.tagline}</p>
-          <Price amount={product.price} compareAt={product.compareAt} className="text-2xl" />
+          <Price prices={priceMap(product)} compareAt={compareMap(product)} className="text-2xl" />
 
           <ul className="mt-1 space-y-1.5 text-sm text-plum-700/80">
             {product.benefits.slice(0, 4).map((b) => (
