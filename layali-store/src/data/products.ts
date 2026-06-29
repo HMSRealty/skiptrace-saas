@@ -469,9 +469,9 @@ const egpPricing: Record<string, { price: number; compareAt?: number }> = {
   "hc-hair-mask": { price: 399 },
   "hc-heatless-curls": { price: 279, compareAt: 399 },
   "hc-rosemary-oil": { price: 299, compareAt: 449 },
-  "tl-hair-styler": { price: 1299, compareAt: 1899 },
+  "tl-hair-styler": { price: 1899, compareAt: 2799 },
   "tl-ice-roller": { price: 249, compareAt: 349 },
-  "tl-ipl": { price: 1499, compareAt: 2199 },
+  "tl-ipl": { price: 2499, compareAt: 3499 },
   "tl-body-set": { price: 349, compareAt: 499 },
 };
 
