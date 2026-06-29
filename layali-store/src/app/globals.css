@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Arabic fonts loaded via <link> in layout head */
+  --font-cairo: "Cairo", system-ui, sans-serif;
+  --font-tajawal: "Tajawal", "Cairo", sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: #fbf7f2;
+  color: #3a2230;
+  font-family: var(--font-cairo);
+}
+
+/* Keep prices/latin runs visually tidy inside RTL text */
+.ltr-nums {
+  direction: ltr;
+  unicode-bidi: embed;
+  display: inline-block;
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-blush-600 px-6 py-3 font-semibold text-white shadow-soft transition hover:bg-blush-500 active:scale-[0.98];
+  }
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-plum-700/20 bg-white px-6 py-3 font-semibold text-plum-800 transition hover:border-blush-400 hover:text-blush-600;
+  }
+  .btn-whatsapp {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-[#25D366] px-6 py-3 font-semibold text-white shadow-soft transition hover:brightness-95 active:scale-[0.98];
+  }
+  .card {
+    @apply rounded-2xl bg-white shadow-soft;
+  }
+  .container-px {
+    @apply mx-auto w-full max-w-6xl px-4 sm:px-6;
+  }
+}

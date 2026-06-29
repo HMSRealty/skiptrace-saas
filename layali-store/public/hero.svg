@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000" direction="rtl">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4a2c3d"/>
+      <stop offset="1" stop-color="#bd4060"/>
+    </linearGradient>
+  </defs>
+  <rect width="1000" height="1000" fill="url(#g)"/>
+  <circle cx="500" cy="500" r="340" fill="rgba(255,255,255,0.06)"/>
+  <circle cx="500" cy="360" r="140" fill="rgba(212,175,106,0.25)"/>
+  <text x="50%" y="160" text-anchor="middle" font-family="'Tajawal','Cairo',sans-serif" font-size="34" font-weight="800" letter-spacing="6" fill="#fbf7f2" opacity="0.85">ليالي</text>
+  <text x="50%" y="510" text-anchor="middle" font-family="'Tajawal','Cairo',sans-serif" font-size="44" font-weight="800" fill="#fbf7f2">ليالي للجمال</text>
+  <text x="50%" y="584" text-anchor="middle" font-family="'Cairo',sans-serif" font-size="26" fill="#fbf7f2" opacity="0.75">جمالكِ يبدأ من هنا</text>
+</svg>
